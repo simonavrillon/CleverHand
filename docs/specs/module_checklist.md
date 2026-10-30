@@ -44,7 +44,7 @@ but **cannot be considered reference-grade or eligible for distribution**.
 ## 5. Firmware / Software (if applicable)
 - [ ] Firmware builds cleanly
 - [ ] Communication protocol documented
-- [ ] Example usage available (Python / C++ / GUI)
+- [ ] Example usage available (Python, `clvhd`)
 
 ---
 

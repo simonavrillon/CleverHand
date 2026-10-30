@@ -131,8 +131,7 @@ def register_values(cfg):
                  | sum((8 << ch) * bool(cfg.high_freq[ch]) for ch in range(3))))
     regs.append((R1_RATE, sum(1 << ch for ch in range(3) if cfg.R1[ch] == 2)))
     regs.append((R2_RATE, R2_CODES[cfg.R2]))
-    for ch in range(3):
-        regs.append((R3_RATE_CH + ch, R3_CODES[cfg.R3[ch]]))
+    regs.extend((R3_RATE_CH + ch, R3_CODES[cfg.R3[ch]]) for ch in range(3))
     regs.append((DRDYB_SRC, 0x08))  # data ready follows channel 1 ECG, as in the datasheet examples
     regs.append((OSC_CN, 0x04))  # STRTCLK: clock the digital part from the module's own crystal
     return regs

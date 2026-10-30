@@ -14,7 +14,15 @@ Set FAULTS=0 to disable the injected faults. When a stream stops, the counts
 of injected faults are printed as JSON. BOOT_S=1 holds the commands for 1 s
 after the port opens, like the Teensy's setup() delay after a power-up.
 """
-import json, math, os, random, select, struct, sys, time, tty
+import json
+import math
+import os
+import random
+import select
+import struct
+import sys
+import time
+import tty
 
 NB = 13
 ODR = 200000 / (4 * 4 * 6)
@@ -79,7 +87,7 @@ def main():
     mask = 0
     next_n = [0] * NB
     counters = [0] * NB
-    stream_t0 = 0
+    stream_t0 = 0.0
     stats = {'drop': 0, 'dup': 0, 'crc': 0}
 
     def need(n):
@@ -168,19 +176,19 @@ def main():
                         stats['drop'] += 1
                         continue
                     ecg = b''.join(code(signal(t_true, ch)) for ch in range(3))
-                    f = bytearray(frame(ord('D'), m, counters[m], micros(t_det), 0xE0, ecg))
+                    fr = bytearray(frame(ord('D'), m, counters[m], micros(t_det), 0xE0, ecg))
                     counters[m] += 1
                     if FAULTS and random.random() < 1 / 5000:
-                        f[random.randrange(1, 22)] ^= 0x10
+                        fr[random.randrange(1, 22)] ^= 0x10
                         stats['crc'] += 1
-                    due.append((t_det, bytes(f)))
+                    due.append((t_det, bytes(fr)))
                     if FAULTS and m == 7 and random.random() < 1 / 1000:
                         stats['dup'] += 1
                         due.append((t_det + 80e-6, frame(ord('D'), m, counters[m], micros(t_det + 80e-6), 0xE0, ecg)))
                         counters[m] += 1
-            out = b''.join(f for _, f in sorted(due, key=lambda x: x[0]))
-            if out:
-                os.write(master, out)
+            out_bytes = b''.join(fr for _, fr in sorted(due, key=lambda x: x[0]))
+            if out_bytes:
+                os.write(master, out_bytes)
 
 
 if __name__ == '__main__':

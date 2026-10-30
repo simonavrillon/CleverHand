@@ -4,9 +4,9 @@
 """
 
 import argparse
-from collections import deque
 import sys
 import time
+from collections import deque
 
 import numpy as np
 
@@ -82,7 +82,7 @@ def main(argv=None):
     rate = cfg.odr()
     print(f"4. Streaming for {args.seconds:g} s at {rate:.2f} sps")
     frames = nan_frames = 0
-    last = deque(maxlen=50)  # ~1 s of chunks, for the contact check
+    last: deque = deque(maxlen=50)  # the last 50 read() chunks (~1 s at 0.02 s), for the contact check
     with wb.stream() as s:
         t_end = time.monotonic() + args.seconds
         while time.monotonic() < t_end:

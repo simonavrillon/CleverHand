@@ -121,7 +121,7 @@ class _Module:
             self.first.append((t, volts))
             if sum(len(b[0]) for b in self.first) < FIRST_FRAMES:
                 return
-            t, volts = (np.concatenate(c) for c in zip(*self.first))
+            t, volts = (np.concatenate(c) for c in zip(*self.first, strict=True))
             self.first, self.indexed = [], True
             n = FIRST_FRAMES
             self._accept(self._first_indices(t[:n]), t[:n], volts[:n])
@@ -286,7 +286,7 @@ class Stream:
                 if m < self.nb:
                     sel = module == m
                     self.modules[m].add(ts32[sel], volts[sel])
-            self.latest_t = max(self.latest_t, max(mod.t_last for mod in self.modules))
+            self.latest_t = max([self.latest_t, *(mod.t_last for mod in self.modules)])
         return self._emit()
 
     def _parse(self):
@@ -318,11 +318,11 @@ class Stream:
         diff = now - self.latest_t * 1e-6
         if self.block_start is None or now - self.block_start > 1.0:
             if self.block_start is not None:
-                self.block_mins = (self.block_mins + [self.block_min])[-10:]
+                self.block_mins = [*self.block_mins, self.block_min][-10:]
             self.block_start, self.block_min = now, diff
         else:
             self.block_min = min(self.block_min, diff)
-        return min([self.block_min] + self.block_mins)
+        return min([self.block_min, *self.block_mins])
 
     def _emit(self):
         empty = (np.zeros(0), np.zeros(0), np.zeros((0, 3 * self.nb)))

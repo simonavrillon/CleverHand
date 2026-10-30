@@ -1,0 +1,26 @@
+{
+  "name": "finger gestures",
+  "task": "gestures",
+  "gestures": [
+    "pinch_index",
+    "pinch_middle",
+    "pinch_ring",
+    "pinch_pinky",
+    "pinch_index_middle",
+    "pinch_all",
+    "extend_thumb",
+    "extend_index",
+    "extend_middle",
+    "extend_ring",
+    "extend_pinky",
+    "extend_thumb_index",
+    "extend_thumb_index_middle",
+    "extend_all",
+    "rest"
+  ],
+  "repetitions": 10,
+  "prepare": 3.0,
+  "go": 1.5,
+  "rest": 2.0,
+  "break_every": 2
+}

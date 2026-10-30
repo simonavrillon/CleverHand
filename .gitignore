@@ -1,3 +1,6 @@
 # Working docs kept local, not tracked
 docs/*plan*
 docs/flashing.md
+
+# macOS Finder metadata
+.DS_Store

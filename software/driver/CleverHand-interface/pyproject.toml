@@ -11,13 +11,16 @@ dependencies = ["numpy", "pyserial"]
 
 [project.optional-dependencies]
 plot = ["pyqtgraph", "PyQt5", "scipy"]
-process = ["scipy", "matplotlib"]
+hand = ["mediapipe"]  # camera hand tracking (brings opencv-contrib-python)
+bids = ["pyedflib"]  # BIDS export (EDF or BDF)
 
 [project.scripts]
 clvhd-check = "clvhd.check:main"
+clvhd-export = "clvhd.bids:main"
+clvhd-movements = "clvhd.cues:main"
 
 [dependency-groups]
-dev = ["pytest"]
+dev = ["pytest", "ruff==0.15.16", "mypy==2.3.1", "types-pyserial"]  # ruff/mypy pins as in MUedit2
 
 [tool.uv]
 # `uv sync` also installs the dev group (pytest); add --all-extras for
@@ -27,5 +30,59 @@ default-groups = ["dev"]
 [tool.setuptools]
 packages = ["clvhd"]
 
+[tool.setuptools.package-data]
+clvhd = ["assets/*.svg"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The repo root, so `from tests._helpers import ...` resolves under a bare pytest.
+pythonpath = ["."]
+addopts = ["-ra", "--strict-markers"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+  # Style and modernisation
+  "I", "UP", "FA", "C4", "SIM", "RET", "PERF", "RUF",
+  # Bug finders
+  "F", "B", "PLE", "PLW", "BLE", "S",
+]
+# ANN: annotations are adopted incrementally (signatures are documented in
+#   docstrings); enable ANN and mypy's disallow_untyped_defs once annotated.
+# ANN401: Any is deliberate at the JSON/array boundaries.
+# C408: dict(key=value) calls read fine and are common in parameter overrides.
+# RUF001-003: non-ASCII (Greek letters, µ, ²) is intentional in comments and docstrings.
+# RUF046: int(round(x)) is kept as an explicit, numpy-safe idiom.
+# S101: assert is used for internal invariants and throughout the tests.
+# S603/S607: subprocess calls use fixed argument lists (the Teensy simulator).
+# BLE001: `except Exception` records the error to re-raise it on the caller's thread.
+ignore = ["ANN", "ANN401", "C408", "RUF001", "RUF002", "RUF003", "RUF046",
+          "S101", "S603", "S607", "BLE001"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["clvhd", "tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"clvhd/hand.py" = ["S310"]        # urlretrieve of the fixed HTTPS model URL
+"tests/_teensy_sim.py" = ["S311"]  # simulation randomness, not cryptographic
+
+[tool.mypy]
+python_version = "3.12"  # numpy >=2.5 stubs use 3.12 syntax; ruff still targets py311
+files = ["clvhd", "examples", "tests"]
+explicit_package_bases = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+check_untyped_defs = true
+# disallow_untyped_defs comes with the ANN rollout (see [tool.ruff.lint]).
+no_implicit_optional = true
+warn_unreachable = true
+enable_error_code = ["possibly-undefined", "redundant-expr", "truthy-bool"]
+
+[[tool.mypy.overrides]]
+# Third-party packages without type information.
+module = ["scipy.*", "pyedflib.*", "pyqtgraph.*", "mediapipe.*", "cv2.*"]
+ignore_missing_imports = true

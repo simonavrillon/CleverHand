@@ -10,7 +10,8 @@ import serial.tools.list_ports
 
 FW_MIN = (4, 1)  # oldest Teensy firmware this driver works with (v4.0 misses ~10% of the samples)
 
-INIT_OK, INIT_STUCK, INIT_TOO_MANY = 0, 1, 2
+# reply status of the 's' command: 0 ok, then these
+INIT_STUCK, INIT_TOO_MANY = 1, 2
 
 FRAME_SYNC = 0xA5
 FRAME_DATA = ord("D")

@@ -9,7 +9,7 @@ Module `i` of a mask (bit `i`) is the module at bus address `i + 1`, the `i`-th 
 | `r` | mask(4) n(1) nc(1) cmd(nc) | n bytes per masked module (at most 255 in total) |
 | `w` | mask(4) n(1) nc(1) cmd(nc) val(n) | none |
 | `s` | — | nb(1) status(1): 0 ok, 1 addressing stuck (a module never got its address), 2 more than 15 modules |
-| `n` | — | nb(1) |
+| `n` | — | nb(1); not used by the Python driver, which gets it from `s` |
 | `m` | v1 v2 v3 | v1 v2 v3 |
 | `v` | — | major(1) minor(1) |
 | `i` | addr(1) led(1) r g b | none. I2C write of `led r g b` to the COM_MOD at `addr` (= module index + 1), `led` 1 or 2 |

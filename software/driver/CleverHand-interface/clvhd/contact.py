@@ -1,5 +1,7 @@
 """Electrode contact check from raw (unfiltered) samples."""
 
+import warnings
+
 import numpy as np
 
 # A channel whose two electrodes sit at the same potential (shorted together
@@ -17,14 +19,18 @@ def check_contact(data):
     """Contact status of each channel of `data` (N samples x channels, in V, raw).
 
     Returns one string per channel: "" (in contact), "flat" (both electrodes
-    at the same potential: shorted together, or both off the skin) or "poor
-    contact" (large DC offset: one electrode barely touching). Use about 0.5 s
-    of data or more.
+    at the same potential: shorted together, or both off the skin), "poor
+    contact" (large DC offset: one electrode barely touching) or "no data"
+    (only NaN: the module sent nothing). Use about 0.5 s of data or more.
     """
     data = np.asarray(data, dtype=float)
-    dc = np.nanmean(data, axis=0)
-    rms = np.nanstd(data, axis=0)
+    empty = np.isnan(data).all(axis=0)
+    with warnings.catch_warnings():  # "Mean of empty slice" on the empty channels
+        warnings.simplefilter("ignore", RuntimeWarning)
+        dc = np.nanmean(data, axis=0)
+        rms = np.nanstd(data, axis=0)
     status = np.full(data.shape[1], "", dtype=object)
     status[np.abs(dc) > OFFSET_DC] = "poor contact"
     status[(rms < FLAT_RMS) & (np.abs(dc) < FLAT_DC)] = "flat"
+    status[empty] = "no data"
     return list(status)
