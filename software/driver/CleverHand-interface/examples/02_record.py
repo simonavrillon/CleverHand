@@ -1,6 +1,6 @@
 """Record the wristband to a .npz file.
 
-    python 03_record.py [seconds] [--out recording.npz] [--port PORT] [--modules 12]
+    python 02_record.py [seconds] [--out recording.npz] [--port PORT] [--modules 13]
 
 The file holds t_host and t_device (s, one per sample), data ((N, 3 * modules)
 in V, NaN where a sample is missing), fs, channel labels and the configuration.
@@ -18,7 +18,7 @@ p = argparse.ArgumentParser()
 p.add_argument("seconds", type=float, nargs="?", default=10, help="duration of the recording")
 p.add_argument("--out", default="recording.npz", help="output file")
 p.add_argument("--port", help="serial port of the Teensy (default: first Teensy found)")
-p.add_argument("--modules", type=int, default=12, help="expected number of modules")
+p.add_argument("--modules", type=int, default=13, help="expected number of modules")
 args = p.parse_args()
 
 with clvhd.Wristband(args.port, expected_modules=args.modules) as wb:

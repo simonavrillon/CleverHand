@@ -4,7 +4,8 @@ The Teensy streams every ECG sample of every module, stamped with the time
 (``micros()``) at which it first saw the sample. Each module runs on its own
 crystal, so this module fits each module's sample period and offset, detects
 dropped or duplicated samples, and resamples all modules onto the sample
-times of module 0.
+times of module 0. The first SETTLE_SAMPLES samples of each module are
+dropped while the ADS1293 decimation filters settle after START_CONV.
 """
 
 import threading
@@ -20,6 +21,9 @@ FIRST_FRAMES = 256         # frames indexed from the nominal period, before the 
 ALIGN_MIN_SAMPLES = 256    # samples before a module's fit is used to align
 CLOCK_TAU_S = 20           # time constant of the clock fit
 HISTORY_S = 1.0            # samples kept per module for the alignment
+# first samples of each module dropped while the decimation filters settle
+# after START_CONV (measured: from -550 mV back to the input within 5 samples)
+SETTLE_SAMPLES = 8
 
 
 class LinearClock:
@@ -84,6 +88,7 @@ class _Module:
         self.T = nominal_period_us
         self.clock = LinearClock(forgetting)
         self.keep = keep
+        self.to_settle = SETTLE_SAMPLES
         self.started = False
         self.first = []  # (t, volts) batches until FIRST_FRAMES have arrived
         self.indexed = False
@@ -97,6 +102,12 @@ class _Module:
 
     def add(self, ts32, volts):
         """Add the frames of one batch (arrival order)."""
+        if self.to_settle:
+            n = min(self.to_settle, len(ts32))
+            self.to_settle -= n
+            ts32, volts = ts32[n:], volts[n:]
+            if len(ts32) == 0:
+                return
         # unwrap micros() (wraps every 71.6 min)
         ts = ts32.astype(np.int64)
         prev = np.concatenate([[self.last_ts32 if self.started else ts[0]], ts[:-1]])
@@ -187,18 +198,17 @@ class Stream:
 
     Use as a context manager (starts and stops the acquisition) or call
     ``start()``/``stop()``. ``read()`` returns ``(t_host, t_device, data)``:
-    sample times in s on the host clock and on the controller clock, and the
+    sample times in s on the host clock (``time.monotonic()``) and on the controller clock, and the
     data, (N, 3 * modules) in V with NaN where a sample is missing.
 
     A background thread drains the serial port continuously, so the Teensy
     never waits on a full buffer however often ``read()`` is called.
     """
 
-    def __init__(self, ctrl, nb_modules, cfg, host_clock=time.monotonic):
+    def __init__(self, ctrl, nb_modules, cfg):
         self.ctrl = ctrl
         self.nb = nb_modules
         self.cfg = cfg
-        self.host_clock = host_clock
         self.nominal_rate = cfg.odr()
         self.adc_max = cfg.adc_max()
         self.channel_labels = [f"m{m}_ch{ch + 1}" for m in range(nb_modules) for ch in range(3)]
@@ -304,7 +314,7 @@ class Stream:
     def _host_offset(self):
         # the smallest (host - device) difference is the one with the least
         # transfer latency; keep the minimum over the last ten 1 s blocks
-        now = self.host_clock()
+        now = time.monotonic()
         diff = now - self.latest_t * 1e-6
         if self.block_start is None or now - self.block_start > 1.0:
             if self.block_start is not None:

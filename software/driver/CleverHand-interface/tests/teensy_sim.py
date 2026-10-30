@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fake Teensy (firmware protocol v4.1) on a pseudo-terminal, for testing the host driver.
 
-12 ADS1293 modules with different clock rates, timestamp jitter of up to
+13 ADS1293 modules with different clock rates, timestamp jitter of up to
 350 us (the Teensy's poll round at 4 MHz with every module ready),
 a micros() wraparound a few seconds in, and injected faults:
   module 5 drops one sample in 2000, module 7 sends one duplicate in 1000,
@@ -16,7 +16,7 @@ after the port opens, like the Teensy's setup() delay after a power-up.
 """
 import json, math, os, random, select, struct, sys, time, tty
 
-NB = 12
+NB = 13
 ODR = 200000 / (4 * 4 * 6)
 ADC_MAX = 0xF30000
 random.seed(1)

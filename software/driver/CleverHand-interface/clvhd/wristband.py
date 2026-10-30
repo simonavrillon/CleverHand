@@ -1,7 +1,5 @@
 """High-level interface to the wristband: Teensy controller + chained ADS1293 modules."""
 
-import time
-
 from . import ads1293
 from .protocol import INIT_TOO_MANY, Controller, ControllerError, find_port
 from .stream import Stream
@@ -10,7 +8,7 @@ from .stream import Stream
 class Wristband:
     """Connect to the Teensy, address the modules and configure them.
 
-    >>> with Wristband(expected_modules=12) as wb:
+    >>> with Wristband(expected_modules=13) as wb:
     ...     wb.configure()
     ...     with wb.stream() as s:
     ...         t_host, t_device, data = s.read(0.05)
@@ -18,9 +16,11 @@ class Wristband:
     ``expected_modules``: raise unless exactly this many modules are found
     (0 accepts any number). Addressing only runs once per power-up, so on a
     mismatch power-cycle the wristband (Teensy included) and retry.
+    ``spi_clock``: the Teensy starts at 4 MHz, too slow to read 13 modules
+    within a sample period (469 us): about 40% of their samples are dropped.
     """
 
-    def __init__(self, port=None, expected_modules=12, leds_off=True, spi_clock=None):
+    def __init__(self, port=None, expected_modules=13, spi_clock=8_000_000):
         port = port or find_port()
         if port is None:
             raise ControllerError("No Teensy found: pass the serial port explicitly")
@@ -42,12 +42,10 @@ class Wristband:
             not_ads = [m for m in range(self.nb_modules) if revid[m] != 0x01]
             if not_ads:
                 raise ControllerError(f"Module(s) {not_ads} do not answer as ADS1293")
-            if leds_off:
-                for m in range(self.nb_modules):
-                    for led in range(2):
-                        self.ctrl.set_led(m, led, (0, 0, 0))
-            if spi_clock:
-                self.set_spi_clock(spi_clock)
+            for m in range(self.nb_modules):
+                for led in range(2):
+                    self.ctrl.set_led(m, led, (0, 0, 0))
+            self.set_spi_clock(spi_clock)
         except Exception:
             self.ctrl.close()
             raise
@@ -69,14 +67,11 @@ class Wristband:
         self.config = cfg
         return cfg
 
-    def stream(self, host_clock=time.monotonic):
-        """Aligned stream of all modules (use ``with wb.stream() as s``).
-
-        ``host_clock``: clock (s) used for the host timestamps, e.g. ``pylsl.local_clock``.
-        """
+    def stream(self):
+        """Aligned stream of all modules (use ``with wb.stream() as s``)."""
         if self.config is None:
             self.configure()
-        return Stream(self.ctrl, self.nb_modules, self.config, host_clock)
+        return Stream(self.ctrl, self.nb_modules, self.config)
 
     def start_conversions(self):
         self.ctrl.write_regs(self.mask, ads1293.CONFIG, [ads1293.START_CONV])

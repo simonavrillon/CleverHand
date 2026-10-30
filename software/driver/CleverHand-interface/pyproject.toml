@@ -10,19 +10,17 @@ requires-python = ">=3.11"
 dependencies = ["numpy", "pyserial"]
 
 [project.optional-dependencies]
-lsl = ["pylsl"]
 plot = ["pyqtgraph", "PyQt5", "scipy"]
 process = ["scipy", "matplotlib"]
 
 [project.scripts]
 clvhd-check = "clvhd.check:main"
-clvhd-lsl = "clvhd.lsl:main"
 
 [dependency-groups]
 dev = ["pytest"]
 
 [tool.uv]
-# `uv sync` also installs the dev group (pytest); add --all-extras for LSL,
+# `uv sync` also installs the dev group (pytest); add --all-extras for
 # plotting and processing (a later plain `uv run` keeps them)
 default-groups = ["dev"]
 

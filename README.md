@@ -8,7 +8,7 @@
 > package. The fork is also heavily modified and cleaned up: the submodules
 > (`CleverHand-hardware`, `CleverHand-interface`, `hc32l110_clvhd`) are absorbed as
 > plain directories and `Cleverhand-configGUI` was removed. See
-> [*This fork: pure-Python driver and 12-node EMG wristband*](#this-fork-pure-python-driver-and-12-node-emg-wristband)
+> [*This fork: pure-Python driver and 13-module EMG wristband*](#this-fork-pure-python-driver-and-13-module-emg-wristband)
 > for the fork-specific implementation. For upstream issues, PRs and contribution
 > rules (`CONTRIBUTING.md`), please use the original repository. All original
 > license files are kept unchanged (`LICENSE`, `LICENSE-DOCS`, `LICENSE-HARDWARE`,
@@ -66,7 +66,7 @@ CleverHand devices are built by chaining small, specialised modules that share:
   Hardware design files (KiCad), manufacturing data, and module-level documentation.
 * [`software`](software/)
   * [`driver`](software/driver)
-    Python driver (`clvhd`), LSL streaming, examples, and the Teensy controller firmware.
+    Python driver (`clvhd`), examples, and the Teensy controller firmware.
   * [`firmware`](software/firmware/)
     Embedded firmware for inter-module communication and host interfacing.
 
@@ -105,7 +105,6 @@ CleverHand devices are built by chaining small, specialised modules that share:
 ### Unified software interface
 
 * Real-time visualisation
-* LSL streaming
 * Pure-Python API (`clvhd`) — this fork; the upstream C++ API and configuration GUI are not part of it
 
 ---
@@ -192,11 +191,11 @@ If you plan to use CleverHand in a study or project, citations and references ar
 
 ---
 
-## This fork: pure-Python driver and 12-node EMG wristband
+## This fork: pure-Python driver and 13-module EMG wristband
 
 This fork **reimplements the CleverHand host stack in pure Python** and implements a
-**12-node EMG wristband** on top of the CleverHand platform:
-each node is a **COM_MOD + EMG_DAQ_ADS1293 + DRY_ELEC_6CH_THIN**, chained on a
+**13-module EMG wristband** on top of the CleverHand platform:
+each module is a **COM_MOD + EMG_DAQ_ADS1293 + DRY_ELEC_6CH_THIN**, chained on a
 **Teensy 4.0** controller (S_TEENSY4 shield).
 
 * **Host driver** — [`software/driver/CleverHand-interface`](software/driver/CleverHand-interface):
@@ -207,7 +206,15 @@ each node is a **COM_MOD + EMG_DAQ_ADS1293 + DRY_ELEC_6CH_THIN**, chained on a
   COM_MOD firmware with I2C bounds-checks, an addressing-race fix, and dimmed LEDs
   to stay within the Teensy 3.3 V budget.
 * **Hardware** — [`hardware/CleverHand-hardware`](hardware/CleverHand-hardware):
-  trimmed to the boards used by the 12-node wristband.
-Status: implemented and checked against a simulated Teensy; not yet tested on
-physical hardware.
+  trimmed to the boards used by the 13-module wristband.
+
+![Live plot of a 13-module wristband during repeated forearm contractions](docs/img/live_plot_contractions.png)
+
+*Live plot (`examples/01_live_plot.py`) of a 13-module band during repeated contractions:
+20–450 Hz band-pass and 50 Hz notch, ±1 mV per module. Each module has its own colour;
+flat channels (shorted electrode pairs) are grayed out, and each channel's contact
+status sits next to its trace. The round buttons light up a module's LEDs.*
+
+Status: tested on a physical 13-module band (the stream is complete at 8 MHz SPI), and
+the driver is also checked against a simulated Teensy.
 

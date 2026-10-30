@@ -1,15 +1,17 @@
-"""Bring-up checks: controller link, addressing, SPI reliability, error flags, streaming timing.
+"""Bring-up checks: controller link, addressing, SPI reliability, error flags, stream timing, contact.
 
-    python -m clvhd.check [--port PORT] [--modules 12] [--seconds 10] [--spi HZ]
+    python -m clvhd.check [--port PORT] [--modules 13] [--seconds 10] [--spi HZ] [--lead-off]
 """
 
 import argparse
+from collections import deque
 import sys
 import time
 
 import numpy as np
 
 from . import ads1293
+from .contact import check_contact
 from .wristband import Wristband
 
 
@@ -37,9 +39,11 @@ def spi_errors(wb, hz, n=2000):
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--port", help="serial port of the Teensy (default: first Teensy found)")
-    p.add_argument("--modules", type=int, default=12, help="expected number of modules")
+    p.add_argument("--modules", type=int, default=13, help="expected number of modules")
     p.add_argument("--seconds", type=float, default=10, help="streaming test duration")
     p.add_argument("--spi", type=int, default=0, help="SPI clock to test (default: 4 and 8 MHz, keep the best)")
+    p.add_argument("--lead-off", action="store_true",
+                   help="flag electrodes off the skin in step 3 (DC lead-off detection)")
     args = p.parse_args(argv)
     check = Report()
 
@@ -64,7 +68,7 @@ def main(argv=None):
     print(f"  using {best / 1e6:g} MHz")
 
     print("3. ADS1293 error flags (wear the band with the bias electrode for this one)")
-    cfg = wb.configure()
+    cfg = wb.configure(lead_off=args.lead_off)
     wb.start_conversions()
     time.sleep(1.0)
     wb.read_errors()  # the flags latch: clear the start-up ones
@@ -72,16 +76,20 @@ def main(argv=None):
     for m, err in enumerate(wb.read_errors()):
         check(err == "", f"module {m}: {err or 'no error'}")
     wb.stop_conversions()
+    if args.lead_off:  # the test current shifts the inputs: off for the stream
+        cfg = wb.configure()
 
     rate = cfg.odr()
     print(f"4. Streaming for {args.seconds:g} s at {rate:.2f} sps")
     frames = nan_frames = 0
+    last = deque(maxlen=50)  # ~1 s of chunks, for the contact check
     with wb.stream() as s:
         t_end = time.monotonic() + args.seconds
         while time.monotonic() < t_end:
             _, t, data = s.read(0.02)
             frames += len(t)
             nan_frames += int(np.isnan(data).any(axis=1).sum())
+            last.append(data)
         stats, crc = s.stats(), s.crc_errors
     wb.close()
 
@@ -104,6 +112,14 @@ def main(argv=None):
     slip = f"one sample slip every {1e6 / (spread * rate):.1f} s" if spread > 0 else "no slip"
     print(f"  module clocks spread over {spread:.1f} ppm: about {slip} without the alignment")
     check(frames > 0.95 * expected, f"{frames} aligned samples, {nan_frames} with a missing value")
+
+    print("5. Electrode contact (last second of the stream, band worn)")
+    status = check_contact(np.concatenate(last))
+    for m in range(wb.nb_modules):
+        bad = [f"ch{ch + 1} {status[3 * m + ch]}" for ch in range(3) if status[3 * m + ch]]
+        check(not bad, f"module {m}: {', '.join(bad) or 'all channels in contact'}")
+    print("  flat: both electrodes at the same potential, shorted (water, sweat, solder) or off the skin; "
+          "poor contact: one electrode barely touching")
 
     print("All checks passed" if check.failures == 0 else f"{check.failures} check(s) failed")
     return 1 if check.failures else 0

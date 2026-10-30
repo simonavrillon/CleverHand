@@ -1,6 +1,6 @@
-"""Load a recording from 03_record.py and plot the EMG envelopes.
+"""Load a recording from 02_record.py and plot the EMG envelopes.
 
-    python 04_process.py [recording.npz]
+    python 03_process.py [recording.npz]
 """
 import sys
 

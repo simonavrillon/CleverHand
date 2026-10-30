@@ -17,9 +17,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-lsl = [
-    { name = "pylsl" },
-]
 plot = [
     { name = "pyqt5" },
     { name = "pyqtgraph" },
@@ -41,14 +38,13 @@ dev = [
 requires-dist = [
     { name = "matplotlib", marker = "extra == 'process'" },
     { name = "numpy" },
-    { name = "pylsl", marker = "extra == 'lsl'" },
     { name = "pyqt5", marker = "extra == 'plot'" },
     { name = "pyqtgraph", marker = "extra == 'plot'" },
     { name = "pyserial" },
     { name = "scipy", marker = "extra == 'plot'" },
     { name = "scipy", marker = "extra == 'process'" },
 ]
-provides-extras = ["lsl", "plot", "process"]
+provides-extras = ["plot", "process"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest" }]
@@ -789,23 +785,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/49/2e/ced460408999b33da6b31b0021b0f37d329e202d4169aeb164493778f25b/pygments-2.21.0.tar.gz", hash = "sha256:610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c", size = 5005329, upload-time = "2026-08-17T08:02:48.824Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl", hash = "sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9", size = 1250147, upload-time = "2026-08-17T08:02:44.912Z" },
-]
-
-[[package]]
-name = "pylsl"
-version = "1.18.6"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/eb/b1/bb0c68594e055849ad6cec0573c0401c405809dc51c2ca4dc12b25c7160d/pylsl-1.18.6.tar.gz", hash = "sha256:f6eed95cc8eb75fe6bf2bcc1f5c1d91672b0cf56c528e93aca07569ffffe2be0", size = 48353, upload-time = "2026-10-14T21:40:06.142Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/79/13/21cc2b6ba0097db3f47b8e9561e791f2d8767e3de147ca763c76ba020a89/pylsl-1.18.6-py3-none-any.whl", hash = "sha256:dfc5046ed1cf2303814a0fdd7cd4c85c6db64409cf7fb9ccb558ebfb9e19a716", size = 50199, upload-time = "2026-10-14T21:39:59.794Z" },
-    { url = "https://files.pythonhosted.org/packages/6e/8c/a321631d26c9933ced7c51fd455e161481c3dd4e2d2c17820164104fa284/pylsl-1.18.6-py3-none-macosx_11_0_universal2.whl", hash = "sha256:0e98ead8a6a24db608074c986f720cd9c0727e9a798f0eb9369b90ab9367fcf0", size = 737284, upload-time = "2026-10-14T21:40:01.277Z" },
-    { url = "https://files.pythonhosted.org/packages/f1/a9/225d65b20dc80bad944d271354345e012d6666c72d5318b78e591a389997/pylsl-1.18.6-py3-none-manylinux_2_35_x86_64.whl", hash = "sha256:d184abba5318c85a456ff1ca88a1960e194ab7c7ac2f31b6d0a06726e36b91e1", size = 1302904, upload-time = "2026-10-14T21:40:02.628Z" },
-    { url = "https://files.pythonhosted.org/packages/e7/73/243cc433ac77607dea80b2df0a3eab9b424f779c633ae14bcc7a86f32dc0/pylsl-1.18.6-py3-none-win32.whl", hash = "sha256:2ab84a0591f2e35baff2305b51cf438db9078fc6ff6ac1fa0a4bac69a6d9c470", size = 301785, upload-time = "2026-10-14T21:40:03.781Z" },
-    { url = "https://files.pythonhosted.org/packages/3e/96/bf1454712d30c7ad69975fb72e18bab8666adb2e3baf1c4cccec549aff2e/pylsl-1.18.6-py3-none-win_amd64.whl", hash = "sha256:2ea0d831cc38653a2fc69a6242ffeb2315b82ab31719c255330afe3d6b7421dc", size = 340339, upload-time = "2026-10-14T21:40:05.049Z" },
 ]
 
 [[package]]

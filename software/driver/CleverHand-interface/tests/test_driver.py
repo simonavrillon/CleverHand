@@ -16,7 +16,7 @@ import pytest
 import clvhd
 from clvhd.protocol import crc8_rows
 from clvhd import ads1293
-from clvhd.stream import LinearClock, _Module
+from clvhd.stream import SETTLE_SAMPLES, LinearClock, _Module
 
 SIM = Path(__file__).with_name("teensy_sim.py")
 
@@ -66,7 +66,7 @@ def faulty_sim(tmp_path):
 
 
 def record(port, seconds):
-    with clvhd.Wristband(port, expected_modules=12) as wb:
+    with clvhd.Wristband(port, expected_modules=13) as wb:
         wb.configure()
         with wb.stream() as s:
             chunks = []
@@ -111,14 +111,47 @@ def test_config_rejects_bad_values():
 def test_config_rejects_missing_rld_module():
     # checked before anything is sent to the controller
     with pytest.raises(ValueError, match="rld_module"):
-        ads1293.configure(None, 12, clvhd.Config(rld_module=12))
+        ads1293.configure(None, 13, clvhd.Config(rld_module=13))
     with pytest.raises(ValueError, match="rld_input"):
         clvhd.Config(rld_input=7).validate()
 
 
+def test_settling_samples_are_dropped():
+    # the first samples after START_CONV swing from -550 mV while the filters settle
+    T = 1e6 / (200000 / 96)
+    mod = _Module(T, 1 - 1 / (20 * 2083), 4000)
+    n = 400
+    ts = (1e6 + np.arange(n) * T).astype(np.uint32)
+    v = np.zeros((n, 3))
+    v[:SETTLE_SAMPLES] = -0.55
+    for i in range(0, n, 5):  # batches shorter than the settling
+        mod.add(ts[i:i + 5], v[i:i + 5])
+    assert mod.samples == n - SETTLE_SAMPLES and mod.dropped == 0
+    assert np.all(mod.v == 0)
+
+
+def test_lead_off_registers_and_flags():
+    regs = dict(ads1293.register_values(clvhd.Config(lead_off=True)))
+    assert (regs[ads1293.LOD_CN], regs[ads1293.LOD_EN], regs[ads1293.LOD_CURRENT]) == (0x00, 0x1F, 1)
+    assert dict(ads1293.register_values(clvhd.Config()))[ads1293.LOD_CN] == 0x08  # shut down
+    assert ads1293.describe_errors([0x10, 0x08, 0, 0, 0, 0, 0]) == "lead off, IN5 lead off"
+
+
+def test_contact_check():
+    # values measured on the band: flat pairs read 0 V and ~3 uV of ADC noise,
+    # pairs on skin tens of mV and tens of uV, a lifted electrode -344 mV
+    rng = np.random.default_rng(0)
+    n = 2083
+    data = np.column_stack([rng.normal(0, 3e-6, n),
+                            -0.030 + rng.normal(0, 30e-6, n),
+                            -0.344 + rng.normal(0, 130e-6, n)])
+    data[[5, 50], 1] = np.nan  # missing samples are ignored
+    assert clvhd.check_contact(data) == ["flat", "", "poor contact"]
+
+
 def test_indexing_tolerates_poll_jitter():
     # the Teensy stamps a sample when it polls it: up to a whole poll round
-    # (~350 us at 4 MHz, 12 modules) after the sample, against a 469 us period
+    # (~350 us at 4 MHz, a whole poll round) after the sample, against a 469 us period
     # Drops and duplicates (80 us late) are injected, some among the first frames.
     T = 1e6 / (204800 / 96)
     for seed in range(5):
@@ -133,6 +166,7 @@ def test_indexing_tolerates_poll_jitter():
         ts = (t.astype(np.int64) & 0xFFFFFFFF).astype(np.uint32)
         v = np.zeros((len(t), 3))
         mod = _Module(T, 1 - 1 / (20 * 2133), 4000)
+        mod.to_settle = 0  # count every frame
         for i in range(0, len(t), 40):
             mod.add(ts[i:i + 40], v[i:i + 40])
         assert (mod.samples, mod.dropped, mod.duplicates) == (n - drop.sum(), drop.sum(), 3)
@@ -142,19 +176,20 @@ def test_connect_while_controller_boots(tmp_path):
     # right after a power-up the Teensy answers only after its 1 s setup()
     s = Sim(tmp_path, faults=False, boot_s=1)
     try:
-        with clvhd.Wristband(s.port, expected_modules=12) as wb:
+        with clvhd.Wristband(s.port, expected_modules=13) as wb:
             assert wb.firmware == (4, 1) and wb.ctrl.mirror()
     finally:
         s.close()
 
 
 def test_connect_and_configure(sim):
-    with clvhd.Wristband(sim.port, expected_modules=12) as wb:
-        assert wb.nb_modules == 12
+    with clvhd.Wristband(sim.port, expected_modules=13) as wb:
+        assert wb.nb_modules == 13
         assert wb.ctrl.mirror()
         cfg = wb.configure()
         assert abs(cfg.odr() - 2083.33) < 0.01
-        assert wb.read_errors() == [""] * 12
+        assert wb.read_errors() == [""] * 13
+        wb.configure(lead_off=True)  # LOD registers read back
         assert wb.set_spi_clock(8_000_000) == 8_000_000
 
 
@@ -194,7 +229,7 @@ def test_faults_are_detected(faulty_sim):
 
 
 def test_commands_while_streaming(sim):
-    with clvhd.Wristband(sim.port, expected_modules=12) as wb:
+    with clvhd.Wristband(sim.port, expected_modules=13) as wb:
         wb.configure()
         with wb.stream() as s:
             s.read(0.2)
@@ -203,14 +238,14 @@ def test_commands_while_streaming(sim):
                 wb.read_errors()
             n = sum(len(s.read(0.1)[1]) for _ in range(5))
         assert n > 0.8 * 0.5 * 2083
-        assert wb.read_errors() == [""] * 12  # usable again once stopped
+        assert wb.read_errors() == [""] * 13  # usable again once stopped
     assert [4, 2, 120, 0, 16] in sim.leds()
 
 
 def test_slow_reader_loses_nothing(sim):
     # a consumer that only reads every 100 ms (e.g. a GUI): the background
     # reader keeps draining the port, so no module falls behind
-    with clvhd.Wristband(sim.port, expected_modules=12) as wb:
+    with clvhd.Wristband(sim.port, expected_modules=13) as wb:
         wb.configure()
         with wb.stream() as s:
             n = 0

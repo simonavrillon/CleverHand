@@ -7,6 +7,9 @@ import numpy as np
 # registers
 CONFIG = 0x00
 FLEX_CH_CN = 0x01  # 0x01-0x03, one per channel
+LOD_CN = 0x06
+LOD_EN = 0x07
+LOD_CURRENT = 0x08
 CMDET_EN = 0x0A
 RLD_CN = 0x0C
 OSC_CN = 0x12
@@ -17,8 +20,6 @@ R2_RATE = 0x21
 R3_RATE_CH = 0x22  # 0x22-0x24
 R1_RATE = 0x25
 DRDYB_SRC = 0x27
-DATA_STATUS = 0x30
-DATA_CH_ECG = 0x37  # 0x37-0x3F, 3 bytes per channel, MSB first
 REVID = 0x40
 
 START_CONV, STANDBY = 0x01, 0x02
@@ -52,11 +53,14 @@ class Config:
     # module whose right-leg drive biases the body through rld_input (None:
     # no bias). IN6 is the extRef net shared by all modules, so only one
     # module may drive it.
-    rld_module: int = 0
+    rld_module: int | None = 0
     rld_input: int = 6
-    # share module 0's clock over its CLK pin (needs the EMG J1 -> COM_MOD
-    # J19/AUX1 wire on every node); otherwise each module uses its own crystal
-    shared_clock: bool = False
+    # DC lead-off detection: 8 nA into every used input. An input whose
+    # electrode is off the skin rises to VDD - 0.5 V and is flagged in
+    # ERROR_LOD (read_errors()). Off while recording: through dry electrodes
+    # (~25 MOhm) 8 nA shifts the channels by up to 200 mV, and more current
+    # flags inputs in good contact.
+    lead_off: bool = False
     clock_hz: float = 4_000_000  # module crystal
 
     def odr(self, ch=0):
@@ -108,7 +112,7 @@ class Config:
 
 
 def register_values(cfg):
-    """Registers written to every module (except RLD_CN and OSC_CN), in write order."""
+    """Registers written to every module (except RLD_CN), in write order."""
     regs = [(CONFIG, STANDBY)]
     for ch in range(3):
         pos, neg = cfg.route[ch]
@@ -117,6 +121,10 @@ def register_values(cfg):
             val |= 0xC0  # inputs shorted (zero test signal)
         regs.append((FLEX_CH_CN + ch, val))
     regs.append((CMDET_EN, cfg.used_inputs()))
+    # LOD_CN: SHDN_LOD (bit 3) powers the block down, SELAC_LOD (bit 2) = 0 is DC mode
+    regs.append((LOD_CN, 0x00 if cfg.lead_off else 0x08))
+    regs.append((LOD_EN, cfg.used_inputs() if cfg.lead_off else 0))
+    regs.append((LOD_CURRENT, 1 if cfg.lead_off else 0))  # 8 nA steps
     # AFE_SHDN_CN: bit ch shuts the INA down, bit ch+3 the modulator
     regs.append((AFE_SHDN_CN, sum(0b001001 << ch for ch in range(3) if not cfg.enable[ch])))
     regs.append((AFE_RES, sum((1 << ch) * bool(cfg.high_res[ch]) for ch in range(3))
@@ -126,6 +134,7 @@ def register_values(cfg):
     for ch in range(3):
         regs.append((R3_RATE_CH + ch, R3_CODES[cfg.R3[ch]]))
     regs.append((DRDYB_SRC, 0x08))  # data ready follows channel 1 ECG, as in the datasheet examples
+    regs.append((OSC_CN, 0x04))  # STRTCLK: clock the digital part from the module's own crystal
     return regs
 
 
@@ -150,19 +159,6 @@ def configure(ctrl, nb_modules, cfg):
     for m in range(nb_modules):
         ctrl.write_regs(1 << m, RLD_CN, [int(rld[m])])
     expected[RLD_CN] = rld
-
-    # OSC_CN: STRTCLK (bit 2) only once the clock runs. The crystal
-    # oscillator runs from power-up; a shared clock needs the master's CLK
-    # output (bit 0) before the others switch to it (SHDN_OSC, bit 1).
-    if cfg.shared_clock and nb_modules > 1:
-        others = every & ~1
-        ctrl.write_regs(1, OSC_CN, [0x05])
-        ctrl.write_regs(others, OSC_CN, [0x02])
-        ctrl.write_regs(others, OSC_CN, [0x06])
-        expected[OSC_CN] = np.array([0x05] + [0x06] * (nb_modules - 1))
-    else:
-        ctrl.write_regs(every, OSC_CN, [0x04])
-        expected[OSC_CN] = np.full(nb_modules, 0x04)
 
     for reg, val in expected.items():
         got = ctrl.read_regs(every, reg, 1)[:, 0]
@@ -190,6 +186,7 @@ _RANGE_BITS = {0: "INA out of range", 1: "INA (+) near (+) rail", 2: "INA (+) ne
 def describe_errors(err):
     """Text of the 7 error registers (ERROR_LOD..ERROR_MISC) of one module, '' if none."""
     out = [_STATUS_BITS[b] for b in range(8) if err[1] >> b & 1]
+    out += [f"IN{i + 1} lead off" for i in range(6) if err[0] >> i & 1]
     for ch in range(3):
         out += [f"ch{ch + 1} {text}" for b, text in _RANGE_BITS.items() if err[2 + ch] >> b & 1]
     return ", ".join(out)

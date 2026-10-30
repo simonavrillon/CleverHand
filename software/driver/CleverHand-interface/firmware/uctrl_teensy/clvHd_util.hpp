@@ -99,7 +99,12 @@ class ClvHd
             m_initStatus = CLVHD_INIT_OK;
             this->m_nbModule = pulses;
         }
-        //init i2c (its first SCL edge also tells the modules to start their I2C slave)
+        // one more rising SCL edge, with every module addressed (m_availPin
+        // high), tells the modules to start their I2C slave. Drive it and
+        // leave SCL high (the I2C idle level): the modules can miss the edge
+        // Wire.begin() makes when it takes the pin over.
+        digitalWrite(m_clkPin, HIGH);
+        delay(width);
         Wire.begin();
         initialized = true;
         if(status != nullptr)

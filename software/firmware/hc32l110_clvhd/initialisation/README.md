@@ -33,7 +33,7 @@ So module *k* takes address *k* on the *k*-th edge, and AVAIL goes high once eve
 | 2 | — | address 2, STOP out low | count 3 | low |
 | 3 | — | — | address 3, STOP out low | high: the Teensy stops |
 
-On the next clock edge (the first edge of `Wire.begin()` on the Teensy), each module sees AVAIL high, disables the clock interrupt and starts an I2C slave at its address. The Teensy then sets the LEDs over I2C (`'i'` command, see the driver's `docs/serial_protocol.md`).
+On the next clock edge, which the Teensy drives once AVAIL is high and leaves high (the I2C idle level) before `Wire.begin()`, each module sees AVAIL high, disables the clock interrupt and starts an I2C slave at its address. The Teensy then sets the LEDs over I2C (`'i'` command, see the driver's `docs/serial_protocol.md`).
 
 The Teensy reports the result of the addressing (`'s'` command):
 
@@ -44,7 +44,7 @@ Addressing runs once per power-up: after a Teensy reset (e.g. a firmware upload)
 
 ## LEDs
 
-The LEDs are dimmed (`LED_ON`, 16/255): at full brightness 12 nodes overload the Teensy's 3.3 V supply. While the clock runs, the LED refresh is skipped, as writing the LEDs disables the interrupts for ~30 us.
+The LEDs are dimmed (`LED_ON`, 16/255): at full brightness 13 nodes overload the Teensy's 3.3 V supply. While the clock runs, the LED refresh is skipped, as writing the LEDs disables the interrupts for ~30 us.
 
 | LED1 | LED2 | State |
 |---|---|---|
