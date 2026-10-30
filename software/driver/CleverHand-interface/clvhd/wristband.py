@@ -1,0 +1,107 @@
+"""High-level interface to the wristband: Teensy controller + chained ADS1293 modules."""
+
+import time
+
+from . import ads1293
+from .protocol import INIT_TOO_MANY, Controller, ControllerError, find_port
+from .stream import Stream
+
+
+class Wristband:
+    """Connect to the Teensy, address the modules and configure them.
+
+    >>> with Wristband(expected_modules=12) as wb:
+    ...     wb.configure()
+    ...     with wb.stream() as s:
+    ...         t_host, t_device, data = s.read(0.05)
+
+    ``expected_modules``: raise unless exactly this many modules are found
+    (0 accepts any number). Addressing only runs once per power-up, so on a
+    mismatch power-cycle the wristband (Teensy included) and retry.
+    """
+
+    def __init__(self, port=None, expected_modules=12, leds_off=True, spi_clock=None):
+        port = port or find_port()
+        if port is None:
+            raise ControllerError("No Teensy found: pass the serial port explicitly")
+        self.port = port
+        self.ctrl = Controller(port)
+        try:
+            self.firmware = self.ctrl.check_version()
+            self.nb_modules, status = self.ctrl.address_modules()
+            if status == INIT_TOO_MANY:
+                print("More than 15 modules on the bus: only the first 15 are used")
+            if expected_modules and self.nb_modules != expected_modules:
+                raise ControllerError(
+                    f"Found {self.nb_modules} modules, expected {expected_modules}. "
+                    "Power-cycle the wristband (Teensy included) and retry; if it "
+                    f"persists, check the ribbon cable after module {self.nb_modules}")
+            if self.nb_modules == 0:
+                raise ControllerError("No module found")
+            revid = self.ctrl.read_regs(self.mask, ads1293.REVID, 1)[:, 0]
+            not_ads = [m for m in range(self.nb_modules) if revid[m] != 0x01]
+            if not_ads:
+                raise ControllerError(f"Module(s) {not_ads} do not answer as ADS1293")
+            if leds_off:
+                for m in range(self.nb_modules):
+                    for led in range(2):
+                        self.ctrl.set_led(m, led, (0, 0, 0))
+            if spi_clock:
+                self.set_spi_clock(spi_clock)
+        except Exception:
+            self.ctrl.close()
+            raise
+        self.config = None
+
+    @property
+    def mask(self):
+        return (1 << self.nb_modules) - 1
+
+    def configure(self, config=None, **kwargs):
+        """Configure every module with ``config`` (default: ``ads1293.Config()``);
+        keyword arguments override its fields, e.g. ``configure(R3=[12, 12, 12])``."""
+        cfg = config or ads1293.Config()
+        for key, val in kwargs.items():
+            if not hasattr(cfg, key):
+                raise TypeError(f"Unknown configuration field {key!r}")
+            setattr(cfg, key, val)
+        ads1293.configure(self.ctrl, self.nb_modules, cfg)
+        self.config = cfg
+        return cfg
+
+    def stream(self, host_clock=time.monotonic):
+        """Aligned stream of all modules (use ``with wb.stream() as s``).
+
+        ``host_clock``: clock (s) used for the host timestamps, e.g. ``pylsl.local_clock``.
+        """
+        if self.config is None:
+            self.configure()
+        return Stream(self.ctrl, self.nb_modules, self.config, host_clock)
+
+    def start_conversions(self):
+        self.ctrl.write_regs(self.mask, ads1293.CONFIG, [ads1293.START_CONV])
+
+    def stop_conversions(self):
+        self.ctrl.write_regs(self.mask, ads1293.CONFIG, [ads1293.STANDBY])
+
+    def read_errors(self):
+        """Error flags of every module ('' when none). The flags latch until read."""
+        regs = self.ctrl.read_regs(self.mask, ads1293.ERROR_LOD, 7)
+        return [ads1293.describe_errors(r) for r in regs]
+
+    def set_led(self, module, led, rgb):
+        """Set LED ``led`` (0 or 1) of ``module`` (0-based) to ``rgb`` = (r, g, b), 0-255."""
+        self.ctrl.set_led(module, led, rgb)
+
+    def set_spi_clock(self, hz):
+        """Teensy-module SPI clock (4 MHz at power-up, ADS1293 max 20 MHz); returns the clock set."""
+        return self.ctrl.set_spi_clock(hz)
+
+    def close(self):
+        self.ctrl.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()

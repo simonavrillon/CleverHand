@@ -1,0 +1,93 @@
+{
+    "modules": [
+        {
+            "name": "bridge",
+            "id": "bridge",
+            "description": "No description available.",
+            "topCategory": "tool",
+            "kind": "bridge",
+            "categoryPath": [
+                "tool",
+                "bridge"
+            ],
+            "priceEur": 69,
+            "stock": 11,
+            "image": "/images/bridge_LDtop.png"
+        },
+        {
+            "name": "CONTROLLER_teensy4",
+            "id": "controller_teensy4",
+            "description": "No description available.",
+            "topCategory": "controller",
+            "kind": "CONTROLLER_teensy4",
+            "categoryPath": [
+                "controller",
+                "CONTROLLER_teensy4"
+            ],
+            "priceEur": 46,
+            "stock": 12,
+            "image": "/images/CONTROLLER_teensy4_LDtop.png"
+        },
+        {
+            "name": "COM_MOD",
+            "id": "com_mod",
+            "description": "No description available.",
+            "topCategory": "hmi_module",
+            "kind": "communication",
+            "categoryPath": [
+                "hmi_module",
+                "communication",
+                "COM_MOD"
+            ],
+            "priceEur": 62,
+            "stock": 45,
+            "image": "/images/COM_MOD_LDtop.png"
+        },
+        {
+            "name": "EMG_DAQ_ADS1293",
+            "id": "emg_daq_ads1293",
+            "description": "No description available.",
+            "topCategory": "hmi_module",
+            "kind": "submodule",
+            "categoryPath": [
+                "hmi_module",
+                "submodule",
+                "sensor",
+                "EMG_DAQ_ADS1293"
+            ],
+            "priceEur": 39,
+            "stock": 45,
+            "image": "/images/EMG_DAQ_ADS1293_LDtop.png"
+        },
+        {
+            "name": "DRY_FLEX",
+            "id": "dry_flex",
+            "description": "No description available.",
+            "topCategory": "hmi_module",
+            "kind": "interface",
+            "categoryPath": [
+                "hmi_module",
+                "interface",
+                "DRY_FLEX"
+            ],
+            "priceEur": 52,
+            "stock": 38,
+            "image": "/images/DRY_FLEX_LDtop.png"
+        },
+        {
+            "name": "DRY_ELEC_6CH_THIN",
+            "id": "dry_elec_6ch_thin",
+            "description": "No description available.",
+            "topCategory": "hmi_module",
+            "kind": "interface",
+            "categoryPath": [
+                "hmi_module",
+                "interface",
+                "DRY_ELEC_6CH_THIN"
+            ],
+            "priceEur": 96,
+            "stock": 37,
+            "image": "/images/DRY_ELEC_6CH_THIN_LDtop.png"
+        }
+    ]
+}

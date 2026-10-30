@@ -1,0 +1,20 @@
+*-backups/
+*-backups/*
+*.lck
+.history/
+
+# KiCad caches and per-user state
+fp-info-cache
+*.kicad_prl
+*.kicad_sch_old
+replicate_layout.log
+
+# Regenerable fabrication / 3D outputs
+**/jlcpcb/gerber/
+**/plots/*_20[0-9][0-9]-*.zip
+**/plots/*.step
+**/plots/*.stl
+**/plots/*.wrl
+
+# Blender autosaves
+*.blend1

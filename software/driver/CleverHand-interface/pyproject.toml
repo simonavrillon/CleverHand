@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clvhd"
+version = "1.0.0"
+description = "Python driver for the CleverHand EMG wristband (Teensy 4.0 + ADS1293 modules)"
+requires-python = ">=3.11"
+dependencies = ["numpy", "pyserial"]
+
+[project.optional-dependencies]
+lsl = ["pylsl"]
+plot = ["pyqtgraph", "PyQt5", "scipy"]
+process = ["scipy", "matplotlib"]
+
+[project.scripts]
+clvhd-check = "clvhd.check:main"
+clvhd-lsl = "clvhd.lsl:main"
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.uv]
+# `uv sync` also installs the dev group (pytest); add --all-extras for LSL,
+# plotting and processing (a later plain `uv run` keeps them)
+default-groups = ["dev"]
+
+[tool.setuptools]
+packages = ["clvhd"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

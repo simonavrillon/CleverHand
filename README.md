@@ -1,4 +1,18 @@
-# CleverHand
+# CleverHand-python
+
+> **Fork notice:** this repository, [**CleverHand-python**](https://github.com/simonavrillon/CleverHand-python),
+> is **simonavrillon's fork** of the original
+> [Aightech/CleverHand](https://github.com/Aightech/CleverHand). It is named after its
+> defining change: the host stack is **reimplemented in pure Python** — the former
+> C++ driver is replaced by the [`clvhd`](software/driver/CleverHand-interface)
+> package. The fork is also heavily modified and cleaned up: the submodules
+> (`CleverHand-hardware`, `CleverHand-interface`, `hc32l110_clvhd`) are absorbed as
+> plain directories and `Cleverhand-configGUI` was removed. See
+> [*This fork: pure-Python driver and 12-node EMG wristband*](#this-fork-pure-python-driver-and-12-node-emg-wristband)
+> for the fork-specific implementation. For upstream issues, PRs and contribution
+> rules (`CONTRIBUTING.md`), please use the original repository. All original
+> license files are kept unchanged (`LICENSE`, `LICENSE-DOCS`, `LICENSE-HARDWARE`,
+> and the `LICENSE` file in each former submodule directory).
 
 **CleverHand** is an **open-source, modular hardware–software platform for Human–Machine Interfaces (HMI)**, designed to support high-quality biosignal acquisition and multimodal sensory feedback in **research, education, and advanced prototyping**.
 
@@ -52,11 +66,9 @@ CleverHand devices are built by chaining small, specialised modules that share:
   Hardware design files (KiCad), manufacturing data, and module-level documentation.
 * [`software`](software/)
   * [`driver`](software/driver)
-    Host-side api and libraries (Drivers, LSL streaming, Python/C++ APIs).
+    Python driver (`clvhd`), LSL streaming, examples, and the Teensy controller firmware.
   * [`firmware`](software/firmware/)
     Embedded firmware for inter-module communication and host interfacing.
-  * [`tools`](software/tools/)
-  Utilities for configuration, testing, and data visualisation:
 
 
 ---
@@ -92,10 +104,9 @@ CleverHand devices are built by chaining small, specialised modules that share:
 
 ### Unified software interface
 
-* Configuration GUI
 * Real-time visualisation
 * LSL streaming
-* Python and C++ APIs
+* Pure-Python API (`clvhd`) — this fork; the upstream C++ API and configuration GUI are not part of it
 
 ---
 
@@ -178,4 +189,25 @@ Contributions are welcome in the form of:
 * or external use cases and feedback.
 
 If you plan to use CleverHand in a study or project, citations and references are appreciated.
+
+---
+
+## This fork: pure-Python driver and 12-node EMG wristband
+
+This fork **reimplements the CleverHand host stack in pure Python** and implements a
+**12-node EMG wristband** on top of the CleverHand platform:
+each node is a **COM_MOD + EMG_DAQ_ADS1293 + DRY_ELEC_6CH_THIN**, chained on a
+**Teensy 4.0** controller (S_TEENSY4 shield).
+
+* **Host driver** — [`software/driver/CleverHand-interface`](software/driver/CleverHand-interface):
+  the pure-Python `clvhd` package (replaces the former C++ driver) with streaming,
+  `python -m clvhd.check` diagnostics, and examples, plus the Teensy controller
+  firmware v4.1 under `firmware/uctrl_teensy`.
+* **Node firmware** — [`software/firmware/hc32l110_clvhd`](software/firmware/hc32l110_clvhd):
+  COM_MOD firmware with I2C bounds-checks, an addressing-race fix, and dimmed LEDs
+  to stay within the Teensy 3.3 V budget.
+* **Hardware** — [`hardware/CleverHand-hardware`](hardware/CleverHand-hardware):
+  trimmed to the boards used by the 12-node wristband.
+Status: implemented and checked against a simulated Teensy; not yet tested on
+physical hardware.
 
