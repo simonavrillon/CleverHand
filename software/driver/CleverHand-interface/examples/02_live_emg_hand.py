@@ -88,19 +88,34 @@ class Window(QtWidgets.QWidget):
         for _, item in self.bones:
             self.view.addItem(item)
 
+        flexion_ticks = [(v, str(v)) for v in (0, 90, 180, 270)]
         flexion_plot = ui.fixed_plot(graphs, 1, 0, FLEXION_RANGE, show_time=False)
         flexion_plot.setLabel("left", "fingers (deg)")
-        flexion_plot.getAxis("left").setTicks([[(v, str(v)) for v in (0, 90, 180, 270)]])
+        flexion_plot.getAxis("left").setTicks([flexion_ticks])
         flexion_plot.setXLink(self.emg.time_plot)
         legend = flexion_plot.addLegend(offset=(5, 5), labelTextColor=ui.TEXT_COLOR, colCount=5)
         legend.setBrush(ui.BACKGROUND_COLOR)
+        legend.setLabelTextSize(f"{ui.FONT_INFO}pt")  # the caption at the same size as the other info text
         self.curves = [flexion_plot.plot(pen=pg.mkPen(c, width=2), name=name, connect="finite")
                        for name, c in FINGER_COLORS.items()]
+        pinch_ticks = [(v, str(v)) for v in (0, 5, 10, 15)]
         pinch_plot = ui.fixed_plot(graphs, 2, 0, PINCH_RANGE, show_time=True)
         pinch_plot.setLabel("left", "pinch (cm)")
-        pinch_plot.getAxis("left").setTicks([[(v, str(v)) for v in (0, 5, 10, 15)]])
+        pinch_plot.getAxis("left").setTicks([pinch_ticks])
         pinch_plot.setXLink(self.emg.time_plot)
         self.curves.append(pinch_plot.plot(pen=pg.mkPen(PINCH_COLOR, width=2), connect="finite"))
+        # Equal total width on the two left axes, so their plot areas start at the same x
+        # and the two x axes (x-linked above) line up. setWidth() pins the tick area and
+        # pyqtgraph adds the rotated label's height (boundingRect * 0.8) on top, so each
+        # axis is sized relative to its own label, against the tallest one.
+        fm = QtGui.QFontMetrics(QtGui.QFont(ui.FONT))
+        tick_w = max(fm.horizontalAdvance(t) for _, t in flexion_ticks + pinch_ticks) + 10
+        axes = [p.getAxis("left") for p in (flexion_plot, pinch_plot)]
+        label_h = [a.label.boundingRect().height() for a in axes]
+        for a, h in zip(axes, label_h, strict=True):
+            a.setWidth(round(tick_w + 0.8 * (max(label_h) - h)))
+        self._left_axes = axes
+        self._graphs, self._flexion_plot = graphs, flexion_plot
         graphs.ci.layout.setRowStretchFactor(0, 4)
         graphs.ci.layout.setRowStretchFactor(1, 3)
         graphs.ci.layout.setRowStretchFactor(2, 2)
@@ -119,6 +134,28 @@ class Window(QtWidgets.QWidget):
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.update_hand)
         self.timer.start(30)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        QtCore.QTimer.singleShot(0, self._place_axis_labels)  # after the axes' own resizes
+        QtCore.QTimer.singleShot(0, self._place_led_buttons)
+
+    def _place_axis_labels(self):
+        # pyqtgraph puts a left axis's name at x=-5, where it overlaps the tick labels;
+        # pin it further left, clear of them
+        for a in self._left_axes:
+            a.label.setPos(QtCore.QPointF(-17, a.label.pos().y()))
+
+    def _place_led_buttons(self):
+        # the EMG panel puts them at its right edge, close to the plots here: centre them
+        # between the EMG traces and these plots
+        corner = self._flexion_plot.vb.sceneBoundingRect().topLeft()
+        right_x = self._graphs.mapToGlobal(self._graphs.mapFromScene(corner))
+        view = self.emg.graphs
+        for proxy, status in self.emg.led_buttons:
+            right = status.mapFromScene(view.mapToScene(view.mapFromGlobal(right_x))).x()
+            left = status.mapFromScene(self.emg.time_plot.vb.sceneBoundingRect().topRight()).x()
+            proxy.setPos((left + right - ui.BUTTON_SIZE) / 2, proxy.pos().y())
 
     def update_hand(self):
         frames = self.tracker.read()

@@ -159,6 +159,7 @@ class EmgPanel(QtWidgets.QWidget):
         widest = QtGui.QFontMetrics(QtGui.QFont(FONT)).horizontalAdvance("ch1 poor contact")
         self.graphs.ci.layout.setColumnFixedWidth(1, widest + BUTTON_SIZE + 20)
         self.curves, self.status_texts = [], []
+        self.led_buttons = []  # (proxy, status plot) per module
         for m in range(nb_modules):
             last_row = m == nb_modules - 1
             traces = fixed_plot(self.graphs, m, 0, (-1, 1), last_row)
@@ -189,6 +190,7 @@ class EmgPanel(QtWidgets.QWidget):
             proxy = QtWidgets.QGraphicsProxyWidget(status)  # outside the view box, which clips clicks
             proxy.setWidget(button)
             status.vb.sigResized.connect(lambda vb, proxy=proxy: self.place_button(proxy, vb))
+            self.led_buttons.append((proxy, status))
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

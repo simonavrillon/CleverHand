@@ -297,7 +297,8 @@ def save_phase(exp, U, extra):
     for e in exp.events:  # stamped at their end (the go, the acquisition or timeout): onset at the start
         start = e["t"] - e["duration"] if e["trial_type"] in ("ready", "reach") else e["t"]
         pos = np.round(exp.positions[e["target"]], 4) + 0.0  # no -0
-        rows.append(bids.event_row(start, t0, fs, **{**e, "duration": round(e["duration"], 6),
+        cols = {k: v for k, v in e.items() if k != "t"}
+        rows.append(bids.event_row(start, t0, fs, **{**cols, "duration": round(e["duration"], 6),
                                                      "target_x": pos[0], "target_y": pos[1]}))
     bids.write_events(written["emg"].with_name(f"{ent.label()}_events.tsv"), rows, EVENT_COLUMNS,
                       EVENT_DESCRIPTIONS)
