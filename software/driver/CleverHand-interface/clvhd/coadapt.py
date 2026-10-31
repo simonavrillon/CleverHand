@@ -4,7 +4,8 @@ The pieces of their experiment, without the display (``examples/04_cursor_coadap
 EMG ``Envelope`` at the 60 Hz display rate, the pseudo-random sum-of-sines ``Trajectory``, the
 20 s decoder update (``optimal_decoder`` / ``smoothbatch``), the conditions (``conditions`` /
 ``session_plan``) and the per-window metrics (``window_metrics``). How this deviates from the
-paper: docs/experiments.md.
+paper: docs/experiments.md. Also 04's gain protocol: the calibration's decoder at the gain of
+a ``GainStaircase`` (``gain_session_plan``).
 
 Units: positions in cm on the screen, velocities in cm/s, envelopes in mV.
 """
@@ -32,6 +33,21 @@ PROBE_S = 20.0  # each trial's last seconds, on the calibration's decoder
 # target: sums of sines at prime multiples of 0.05 Hz, distinct per axis
 FREQS_X = (0.10, 0.25)
 FREQS_Y = (0.15, 0.35)
+# gain staircase: the largest decoder gain whose error stays within GAIN_TOL of the reference
+GAIN_TOL = 0.1
+# first step, in log gain per unit of error ratio, and its floor (to keep following the
+# user's learning): on the simulated user, the smallest that reach the threshold from 0.5
+# within 14 updates (tests/_simulated_user.py)
+GAIN_A0 = 3.0
+GAIN_A_MIN = 0.75
+GAIN_STEP_MAX = float(np.log(1.2))  # at most 20 % per update: small overshoots
+SETTLE_S = 5.0  # left out of each window after a gain change, while the user re-tunes
+GAIN_STARTS = {"low": 0.5, "high": 2.0}  # times the calibration's gain
+# gain protocol: short trials against fatigue, the staircase carried over between a start's
+# trials; reference trials (gain 1) first for e_ref, and one last
+GAIN_TRIAL_S = 120.0
+GAIN_RUNS = 3  # trials per start
+GAIN_REFERENCES = 2
 
 
 def conditions():
@@ -40,6 +56,18 @@ def conditions():
         {"learning_rate": r, "alpha": alpha, "penalty": PENALTY, "lambda": PENALTIES[PENALTY]}
         for r, alpha in LEARNING_RATES.items()
     ]
+
+
+def gain_session_plan(rng, runs=GAIN_RUNS):
+    """Trial conditions of the gain protocol: ``GAIN_REFERENCES`` references, then ``runs``
+    pairs of a low- and a high-start staircase trial (each pair shuffled), then a reference:
+    dicts of start ("reference", or a key of ``GAIN_STARTS``)."""
+    plan = [{"start": "reference"} for _ in range(GAIN_REFERENCES)]
+    for _ in range(runs):
+        pair = [{"start": start} for start in GAIN_STARTS]
+        rng.shuffle(pair)
+        plan += pair
+    return [*plan, {"start": "reference"}]
 
 
 def session_plan(rng, blocks=2):
@@ -125,11 +153,12 @@ def smoothbatch(D_prev, D_star, alpha):
     return alpha * D_prev + (1 - alpha) * D_star
 
 
-def window_metrics(tau, y, effort, X, D, D0):
-    """One window's dict: ``error`` (mean distance target - cursor, cm), ``effort`` (mean),
-    and the EMG part of decoder D against the calibration's D0 on its features X (T, p):
-    ``gain`` (mean speed ratio) and ``direction`` (mean correlation of their outputs per
-    axis; 1: the same mapping, rescaled)."""
+def window_metrics(tau, y, effort, X, D, D0, t, v, Z):
+    """One window's dict: ``error`` (mean distance target - cursor, cm), ``effort`` (mean);
+    the EMG part of decoder D against the calibration's D0 on its features X (T, p): ``gain``
+    (mean speed ratio) and ``direction`` (mean correlation of their outputs per axis; 1: the
+    same mapping, rescaled); the ``remnant`` (2,) of the velocities ``v`` at trial times
+    ``t``, and the ``null_space`` share of the activity ``Z`` (T, C) under D."""
     P, P0 = X[:, :-1] @ D[:, :-1].T, X[:, :-1] @ D0[:, :-1].T
     s0 = np.linalg.norm(P0, axis=1).mean()
     ok = [a for a in range(2) if P[:, a].std() > 0 and P0[:, a].std() > 0]
@@ -140,7 +169,71 @@ def window_metrics(tau, y, effort, X, D, D0):
         "direction": float(np.mean([np.corrcoef(P[:, a], P0[:, a])[0, 1] for a in ok]))
         if ok
         else np.nan,
+        "remnant": remnant(t, v),
+        "null_space": null_space_share(Z, D),
     }
+
+
+class GainStaircase:
+    """The largest decoder gain whose tracking error stays within ``tol`` of the reference
+    ``e_ref``: stochastic approximation on log gain (Robbins-Monro), its step shrinking at each
+    crossing of the target ratio 1 + ``tol`` (Kesten), down to ``a_min``. ``crossings`` and
+    ``last`` continue a staircase (``state()``) from an earlier trial."""
+
+    def __init__(
+        self,
+        gain,
+        e_ref,
+        tol=GAIN_TOL,
+        a0=GAIN_A0,
+        a_min=GAIN_A_MIN,
+        max_step=GAIN_STEP_MAX,
+        crossings=0,
+        last=0.0,
+    ):
+        self.gain, self.e_ref, self.tol = float(gain), float(e_ref), tol
+        self.a0, self.a_min, self.max_step = a0, a_min, max_step
+        self.crossings = int(crossings)
+        self.last = float(last)  # the previous window's error ratio minus the target
+
+    def state(self):
+        """What continues this staircase: gain, crossings, last."""
+        return {"gain": self.gain, "crossings": self.crossings, "last": self.last}
+
+    def update(self, error):
+        """The gain after a window of mean tracking ``error`` (cm)."""
+        d = error / self.e_ref - (1 + self.tol)
+        if d * self.last < 0:
+            self.crossings += 1
+        self.last = d if d else self.last
+        a = max(self.a0 / (1 + self.crossings), self.a_min)
+        self.gain *= float(np.exp(np.clip(-a * d, -self.max_step, self.max_step)))
+        return self.gain
+
+
+def remnant(t, v, freqs=(FREQS_X, FREQS_Y)):
+    """Per axis (2,), the share of the variance of cursor velocities ``v`` (T, 2) at trial times
+    ``t`` (s, after the ramp) that sines at that axis's target ``freqs`` don't explain."""
+    t, v = np.asarray(t, dtype=float), np.asarray(v, dtype=float)
+    out = np.full(2, np.nan)
+    for axis, f in enumerate(freqs):
+        w = 2 * np.pi * np.asarray(f) * t[:, None]
+        A = np.column_stack([np.cos(w), np.sin(w), np.ones(len(t))])
+        r = v[:, axis] - A @ np.linalg.lstsq(A, v[:, axis], rcond=None)[0]
+        var = v[:, axis].var()
+        out[axis] = (r**2).mean() / var if var > 0 else np.nan
+    return out
+
+
+def null_space_share(Z, D):
+    """Share of the energy of activity ``Z`` (T, C: the decoder's features of each channel above
+    rest) that decoder ``D`` (2, lags * C + 1) maps to no velocity, its lags summed:
+    co-contraction and task-irrelevant activity."""
+    Z = np.asarray(Z, dtype=float)
+    W = np.asarray(D)[:, :-1].reshape(2, -1, Z.shape[1]).sum(axis=1)
+    null = Z - Z @ (np.linalg.pinv(W) @ W)  # the projection is symmetric
+    total = (Z**2).sum()
+    return float((null**2).sum() / total) if total > 0 else np.nan
 
 
 class Envelope:

@@ -44,6 +44,14 @@ class TestWienerFilter:
         with pytest.raises(ValueError, match="does not have: m1_ch2"):
             decoder.channel_indices(tmp_path / "d.npz", labels[:2])
 
+    def test_activity_is_the_features_above_rest(self):
+        U, V, groups, in_fit = simulated(np.random.default_rng(5), 1.0)
+        wf = decoder.WienerFilter.fit(U, V, groups, in_fit)
+        assert wf.floor is not None
+        rest, above = wf.activity(wf.floor[None]), wf.activity(2 * wf.floor[None] + 0.01)
+        assert np.allclose(rest, 0) and (above > 0).all()
+        assert np.allclose(wf.activity(0.5 * wf.floor[None]), 0)  # below rest: none
+
     # ── output stage ────────────────────────────────────────────────────
 
     def test_direction_gains_balance_the_speeds(self):

@@ -179,13 +179,28 @@ The windows share one look, from `clvhd/ui.py`:
   same session, `--decoder <its _desc-decoder.npz>`, required), without its output stage and with
   its constant term kept (only the EMG weights are refitted), and every trial starts from its fit
   instead of the paper's random D1 / D2, so the cursor follows the participant from the first
-  second; the intended velocity is (target − cursor) / 0.5 s rather than per frame, and λ is
-  relative to the features' energy (low 1, high 10), so the updates refine the decoder at the
-  task's speeds instead of λ alone setting them. The EMG files keep every channel. The task runs in
+  second; and λ is relative to the features' energy (low 1, high 10). As in the authors'
+  published analysis code (the paper's equation reads per frame), the intended velocity is
+  (target − cursor) / 0.5 s, so the updates refine the decoder at the task's speeds. Smaller
+  differences (decoder history, edge reset, frame rate): [docs/experiments.md](docs/experiments.md).
+  The EMG files keep every channel. The task runs in
   a 22.7 × 15.8 cm area (an 11-inch iPad), centred on the screen; `--field-cm 46.5 24.5` gives the
   paper's display. Same palette as 03 (`clvhd.ui`): dark background, the task field outlined, a
   white cursor, the target in a module colour that changes each trial (the paper's were red and blue
   on white).
+
+  `--protocol gain` (in its own `--session`): the calibration's decoder, never refitted, its EMG
+  weights times a gain that a staircase moves every 20 s towards the largest gain whose tracking
+  error stays within 10 % of the reference trials' (where the participant needs the least
+  contraction without losing accuracy). 9 two-minute trials (`--trial-seconds`, default 120): two
+  references at gain 1, then three pairs of a staircase starting low (0.5) and one starting high
+  (2), each pair shuffled, each start's staircase carried over between its trials, then a last
+  reference; no probe, and no break between blocks (Space after each trial, as between the
+  others). The console also prints each gain; the files get a `gain` column in `beh/`,
+  `gain_update` events, and in the derivative the gains, the reference error and the staircase's
+  state (a rerun resumes from it; `optimal_decoders` stays empty). Every window also saves the remnant (cursor velocity not at the
+  target's frequencies) and the null-space share (activity the decoder maps to no motion). Design:
+  [docs/experiments.md](docs/experiments.md).
 
 ## Recording to a BIDS dataset
 

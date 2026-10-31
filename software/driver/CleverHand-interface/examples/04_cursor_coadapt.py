@@ -1,7 +1,7 @@
 """Co-adaptive myoelectric cursor tracking, after Madduri et al., Nat. Mach. Intell. 8, 372 (2026).
 
     python 04_cursor_coadapt.py --subject 01 --decoder CALIBRATION [--session 01]
-        [--bids-root data]
+        [--protocol coadapt|gain] [--bids-root data]
         [--port PORT] [--modules 13] [--screen-width-cm 52.7] [--windowed]
 
 The participant moves a white cursor with their forearm EMG to follow a coloured target along
@@ -9,9 +9,13 @@ a pseudo-random sum-of-sines path; the cursor velocity is a linear decoder of th
 envelope (the calibration's, --decoder) that adapts every 20 s (SmoothBatch; pieces in
 clvhd.coadapt). Six 5-minute trials in two blocks run the 3 learning-rate conditions once per
 block, shuffled, each ending with 20 s on the calibration's decoder, unannounced (the probe).
-Space starts a trial, Escape quits (the trial is run again; what it recorded goes to
-derivatives/coadapt/ as _desc-interrupted...npz), and a rerun resumes at the first unsaved
-trial. Per trial, the BIDS dataset gets emg/ + _events.tsv, beh/ and derivatives/coadapt/
+--protocol gain instead keeps the calibration's decoder and scales its EMG weights by a gain
+that a staircase moves every 20 s, towards the largest gain whose tracking error stays within
+10 % of the reference trials' (at gain 1): 2-minute trials, two references, three pairs of a
+low- and a high-start trial (each start's staircase carried over between its trials), a last
+reference; no probe. Space starts a trial, Escape quits (the trial is run again; what it
+recorded goes to derivatives/coadapt/ as _desc-interrupted...npz), and a rerun resumes at the
+first unsaved trial. Per trial, the BIDS dataset gets emg/ + _events.tsv, beh/ and derivatives/coadapt/
 (.npz with the envelopes, every decoder, the windows' metrics and the trajectory). Full
 description: the driver README, "Examples"; how this deviates from the paper:
 docs/experiments.md.
@@ -32,8 +36,24 @@ from clvhd.coadapt import RAMP_S, UPDATE_S
 
 p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
 ui.add_task_arguments(p, task="cursor")
-p.add_argument("--trial-seconds", type=float, default=coadapt.TRIAL_S)
-p.add_argument("--break-seconds", type=float, default=300, help="break between the blocks")
+p.add_argument(
+    "--protocol",
+    choices=("coadapt", "gain"),
+    default="coadapt",
+    help="coadapt: the decoder adapts (SmoothBatch); gain: the calibration's decoder at a "
+    "staircase's gain",
+)
+p.add_argument(
+    "--trial-seconds",
+    type=float,
+    help=f"default {coadapt.TRIAL_S:g} (coadapt) or {coadapt.GAIN_TRIAL_S:g} (gain)",
+)
+p.add_argument(
+    "--break-seconds",
+    type=float,
+    default=300,
+    help="break between the blocks (coadapt protocol; the gain protocol has none)",
+)
 p.add_argument("--trials", type=int, default=0, help="stop after this many trials (0: all)")
 p.add_argument(
     "--amplitude",
@@ -51,10 +71,17 @@ p.add_argument(
     "--autostart", action="store_true", help="start each trial without waiting for space"
 )
 args = p.parse_args()
+GAIN_PROTOCOL = args.protocol == "gain"
+if args.trial_seconds is None:
+    args.trial_seconds = coadapt.GAIN_TRIAL_S if GAIN_PROTOCOL else coadapt.TRIAL_S
 
 PIPELINE = "coadapt"
 TASK_DESCRIPTION = (
-    "Co-adaptive myoelectric cursor tracking (Madduri et al. 2026): follow a "
+    "Myoelectric cursor tracking at a staircase's decoder gain: follow a target with a "
+    "cursor whose velocity is decoded from the EMG by the calibration's linear decoder, its "
+    "EMG weights scaled towards the largest gain that keeps the tracking error."
+    if GAIN_PROTOCOL
+    else "Co-adaptive myoelectric cursor tracking (Madduri et al. 2026): follow a "
     "target with a cursor whose velocity is decoded from the EMG by an adaptive "
     "linear decoder."
 )
@@ -70,6 +97,9 @@ EVENT_COLUMNS = [
     "alpha",
     "penalty",
     "lambda",
+    "protocol",
+    "start",
+    "gain",
 ]
 EVENT_DESCRIPTIONS = {
     "onset": {"Description": "Time from the first EMG sample of the file.", "Units": "s"},
@@ -77,11 +107,16 @@ EVENT_DESCRIPTIONS = {
     "sample": {"Description": "EMG sample at the onset (zero-based)."},
     "trial_type": {
         "Levels": {
-            "trial_start": "Target and cursor start moving; the decoder is the calibration's.",
+            "trial_start": "Target and cursor start moving; the decoder is the calibration's (gain "
+            "protocol: at the trial's starting gain).",
             "ramp_end": f"End of the {RAMP_S:g} s ramp: target and cursor at full speed.",
             "decoder_update": "A new decoder D = alpha D- + (1 - alpha) D* takes over (value: update "
             "number, D* fitted on the previous 20 s, on the intended velocity "
             "(target - cursor) / 0.5 s).",
+            "gain_update": "The staircase sets the gain of the decoder's EMG weights (value: "
+            "the new gain), from the error of the 20 s since the previous update, its first "
+            f"{coadapt.SETTLE_S:g} s left out. At the trial's end: the gain the start's "
+            "next trial begins with.",
             "probe_start": f"The decoder goes back to the calibration's for the last "
             f"{coadapt.PROBE_S:g} s, unannounced.",
             "cursor_reset": "Cursor held at the screen edge for 3.33 s, moved to the centre.",
@@ -106,6 +141,20 @@ EVENT_DESCRIPTIONS = {
         "column excepted), times the mean energy of the features of the "
         "20 s fitted."
     },
+    "protocol": {
+        "Levels": {
+            "coadapt": "the decoder adapts every 20 s (SmoothBatch)",
+            "gain": "the calibration's decoder, its EMG weights times a staircase's gain",
+        }
+    },
+    "start": {
+        "Description": "Gain protocol: the trial's staircase.",
+        "Levels": {
+            "reference": "gain 1 throughout: the reference error",
+            **{k: f"the staircase started at gain {g:g}" for k, g in coadapt.GAIN_STARTS.items()},
+        },
+    },
+    "gain": {"Description": "Gain protocol: the decoder gain at the trial's start."},
 }
 BEH_COLUMNS = {
     "time": ("Time from the first EMG sample of the run's EMG file", "s"),
@@ -132,6 +181,7 @@ BEH_COLUMNS = {
         None,
     ),
     "probe": ("1 in the last seconds, on the calibration's decoder", None),
+    "gain": ("Gain of the decoder's EMG weights (1 in the coadapt protocol)", None),
 }
 
 
@@ -217,8 +267,31 @@ class Experiment(ui.TaskWindow):
         self.decoders, self.optimal, self.update_times = [self.D.copy()], [], []
         self.resets = []
         self.next_update = UPDATE_S
+        self.changed = -np.inf  # trial time of the last gain change
+        self.staircase, self.e_ref = None, None
+        if GAIN_PROTOCOL and self.cond["start"] != "reference":
+            self.e_ref = reference_error(self.plan, self.trial)
+            self.staircase = coadapt.GainStaircase(
+                e_ref=self.e_ref, **staircase_state(self.plan, self.trial, self.cond["start"])
+            )
+            self.D[:, :-1] *= self.staircase.gain
+            self.decoders = [self.D.copy()]
+        self.gains = [1.0 if self.staircase is None else self.staircase.gain]
         self.start_recording(trial_entities(self.trial), TASK_DESCRIPTION)
-        print(f"Trial {self.trial + 1}/{len(self.plan['conditions'])} started")
+        print(
+            f"Trial {self.trial + 1}/{len(self.plan['conditions'])} started"
+            + (f", {self.cond['start']}: gain {self.gains[0]:.2f}" if GAIN_PROTOCOL else "")
+        )
+
+    def set_gain(self, gain, now, trial_t):
+        """The calibration's decoder, its EMG weights times ``gain``, from now on."""
+        self.D = self.D0.copy()
+        self.D[:, :-1] *= gain
+        self.decoders.append(self.D.copy())
+        self.gains.append(gain)
+        self.update_times.append(now)
+        self.changed = trial_t
+        print(f"  {trial_t:5.1f} s: gain {gain:.2f}")
 
     def frame(self, now):
         trial_t = now - self.t_start
@@ -243,12 +316,19 @@ class Experiment(ui.TaskWindow):
                 "reset": int(reset),
                 "effort": effort,
                 "probe": int(self.probing),
+                "gain": self.gains[-1],
             }
         )
         if reset:
             self.resets.append(now)
 
-        if not self.probing and trial_t >= args.trial_seconds - coadapt.PROBE_S:
+        if GAIN_PROTOCOL:  # no probe; the last update is the start's next trial's gain
+            if trial_t >= self.next_update:
+                m = self.close_window(trial_t)
+                if self.staircase is not None and m is not None:
+                    self.set_gain(self.staircase.update(m["error"]), now, trial_t)
+                self.next_update += UPDATE_S
+        elif not self.probing and trial_t >= args.trial_seconds - coadapt.PROBE_S:
             self.close_window(trial_t)
             self.probing, self.probe_time = True, now
             self.D = self.D0.copy()  # unannounced: the participant sees no change but the cursor's
@@ -270,11 +350,13 @@ class Experiment(ui.TaskWindow):
             self.end_trial(now)
 
     def close_window(self, trial_t):
-        """The metrics of the frames since the last window, printed and kept."""
-        frames = [fr for fr in self.frames[self.window_start :] if fr["trial_t"] > coadapt.RAMP_S]
+        """The metrics of the frames since the last window (after the ramp, and ``SETTLE_S``
+        after a gain change), printed, kept and returned (None without frames)."""
+        settled = max(coadapt.RAMP_S, self.changed + coadapt.SETTLE_S)
+        frames = [fr for fr in self.frames[self.window_start :] if fr["trial_t"] > settled]
         self.window_start = len(self.frames)
         if not frames:
-            return
+            return None
         m = coadapt.window_metrics(
             [fr["tau"] for fr in frames],
             [fr["y"] for fr in frames],
@@ -282,6 +364,9 @@ class Experiment(ui.TaskWindow):
             np.array([fr["x"] for fr in frames]),
             self.D,
             self.D0,
+            [fr["trial_t"] for fr in frames],
+            [fr["v"] for fr in frames],
+            self.wf.activity(np.array([fr["u"] for fr in frames])),
         )
         m.update(
             start=frames[0]["trial_t"],
@@ -293,9 +378,11 @@ class Experiment(ui.TaskWindow):
         print(
             f"  {m['start']:5.1f}-{m['end']:5.1f} s{' probe' if self.probing else ''}: error "
             f"{m['error']:4.1f} cm, effort {m['effort']:4.2f}, decoder {m['decoder_index']}: gain "
-            f"{m['gain']:4.2f}, direction {m['direction']:+.2f}",
+            f"{m['gain']:4.2f}, direction {m['direction']:+.2f}, remnant "
+            f"{np.mean(m['remnant']):.2f}, null space {m['null_space']:.2f}",
             flush=True,
         )
+        return m
 
     def end_trial(self, now):
         self.state = "saving"
@@ -309,7 +396,8 @@ class Experiment(ui.TaskWindow):
             self.state = "done"
             if args.autostart:
                 QtWidgets.QApplication.quit()
-        elif self.trial == len(self.plan["conditions"]) // 2:
+        # the gain protocol rests the same between every trial: its starts see the same drift
+        elif not GAIN_PROTOCOL and self.trial == len(self.plan["conditions"]) // 2:
             self.state, self.break_end = "break", time.monotonic() + args.break_seconds
         else:
             self.state = "ready"
@@ -317,6 +405,35 @@ class Experiment(ui.TaskWindow):
 
 def trial_entities(trial):
     return bids.Entities(args.subject, args.task, args.session, run=f"{trial + 1:02d}")
+
+
+def derivative_path(trial):
+    """The saved trial's derivatives/coadapt/.../emg/_desc-coadapt.npz."""
+    ent = trial_entities(trial)
+    deriv = ent.folder(args.bids_root / "derivatives" / PIPELINE) / "emg"
+    return deriv / f"{ent.label()}_desc-coadapt.npz"
+
+
+def reference_error(plan, trial):
+    """Gain protocol: the mean window error (cm) of the reference trials before ``trial``."""
+    errors: list[float] = []
+    for k in range(trial):
+        if plan["conditions"][k]["start"] == "reference":
+            with np.load(derivative_path(k)) as f:
+                errors += f["window_error"].tolist()
+    if not errors:
+        raise SystemExit("No reference trial is saved before this one: run the session in order")
+    return float(np.mean(errors))
+
+
+def staircase_state(plan, trial, start):
+    """Gain protocol: the staircase state the last trial of ``start`` before ``trial`` ended
+    with, or its starting gain."""
+    for k in reversed(range(trial)):
+        if plan["conditions"][k]["start"] == start:
+            with np.load(derivative_path(k)) as f:
+                return json.loads(str(f["staircase"]))
+    return {"gain": coadapt.GAIN_STARTS[start]}
 
 
 def save_trial(exp, t_end):
@@ -335,13 +452,25 @@ def save_trial(exp, t_end):
             t, t0, fs, **{"duration": 0, "trial_type": kind, "value": value, **extra}
         )
 
+    start = {
+        "protocol": args.protocol,
+        **exp.cond,
+        **({"gain": exp.gains[0]} if GAIN_PROTOCOL else {}),
+    }
     rows = [
-        event(exp.t_start, "trial_start", duration=round(t_end - exp.t_start, 6), **exp.cond),
+        event(exp.t_start, "trial_start", duration=round(t_end - exp.t_start, 6), **start),
         event(exp.t_start + RAMP_S, "ramp_end"),
         event(t_end, "trial_end"),
     ]
-    rows += [event(t, "decoder_update", k + 1) for k, t in enumerate(exp.update_times)]
-    rows += [event(exp.probe_time, "probe_start")]
+    if GAIN_PROTOCOL:
+        rows += [
+            event(t, "gain_update", round(g, 4))
+            for t, g in zip(exp.update_times, exp.gains[1:], strict=True)
+        ]
+    else:
+        rows += [event(t, "decoder_update", k + 1) for k, t in enumerate(exp.update_times)]
+    if exp.probe_time is not None:
+        rows += [event(exp.probe_time, "probe_start")]
     rows += [event(t, "cursor_reset") for t in exp.resets]
     bids.write_events(
         written["emg"].with_name(f"{ent.label()}_events.tsv"),
@@ -366,16 +495,25 @@ def save_trial(exp, t_end):
                 fr["reset"],
                 fr["effort"],
                 fr["probe"],
+                fr["gain"],
             ]
             for fr in exp.frames
         ],
+        Protocol=args.protocol,
         Condition=exp.cond,
         **exp.beh_sidecar(),
         TargetRadiusCm=float(exp.target_radius),
         DecoderFile=exp.plan["decoder_file"],
-        HorizonS=coadapt.HORIZON_S,
-        ProbeS=coadapt.PROBE_S,
         EffortReferenceMv=exp.plan["effort_reference"],
+        **(
+            {
+                "ReferenceErrorCm": exp.e_ref,
+                "GainTolerance": coadapt.GAIN_TOL,
+                "SettleS": coadapt.SETTLE_S,
+            }
+            if GAIN_PROTOCOL
+            else {"HorizonS": coadapt.HORIZON_S, "ProbeS": coadapt.PROBE_S}
+        ),
     )
     bids.write_scans(root, ent, [written["emg"], beh], written["acq_time"])
     save_derivative(exp, f"{ent.label()}_desc-coadapt.npz", t0)
@@ -397,7 +535,7 @@ def save_interrupted(exp):
 def save_derivative(exp, name, t0):
     """The trial's 60 Hz frames, decoders and windows, as derivatives/coadapt/.../emg/``name``."""
     frames, labels, windows = exp.frames, exp.stream.channel_labels, exp.windows
-    deriv = trial_entities(exp.trial).folder(args.bids_root / "derivatives" / PIPELINE) / "emg"
+    deriv = derivative_path(exp.trial).parent
     deriv.mkdir(parents=True, exist_ok=True)
     payload: dict[str, Any] = {
         "effort": np.array([fr["effort"] for fr in frames]),
@@ -413,8 +551,16 @@ def save_derivative(exp, name, t0):
                 "effort",
                 "gain",
                 "direction",
+                "remnant",
+                "null_space",
             )
         },
+        "protocol": args.protocol,
+        "gain": np.array([fr["gain"] for fr in frames]),
+        "gains": np.array(exp.gains),  # the trial's initial gain, then each update's
+        "reference_error": np.nan if exp.e_ref is None else exp.e_ref,
+        # what the start's next trial continues from ("" outside the gain staircases)
+        "staircase": "" if exp.staircase is None else json.dumps(exp.staircase.state()),
         "probe_time": np.nan if exp.probe_time is None else exp.probe_time - t0,
         "effort_reference": exp.plan["effort_reference"],
         "time": np.array([fr["t"] - t0 for fr in frames]),
@@ -426,7 +572,7 @@ def save_derivative(exp, name, t0):
         "envelopes": np.array([fr["u"] for fr in frames]),
         "decoder_index": np.array([fr["decoder_index"] for fr in frames]),
         "decoders": np.array(exp.decoders),
-        "optimal_decoders": np.array(exp.optimal),
+        "optimal_decoders": np.array(exp.optimal),  # empty (shape (0,)) in the gain protocol
         "update_time": np.array(exp.update_times) - t0,
         "decoder_channels": [labels[c] for c in exp.channels],  # the columns of the envelopes
         "condition": json.dumps(exp.cond),
@@ -453,6 +599,12 @@ def load_plan(stream):
     source = str(Path(args.decoder).resolve())
     if path.exists():
         plan = json.loads(path.read_text())
+        made_for = plan.get("protocol", "coadapt")
+        if made_for != args.protocol:
+            raise SystemExit(
+                f"{path} was made for the {made_for} protocol: use another --session, or "
+                f"--protocol {made_for}"
+            )
         if plan["labels"] != labels:
             raise SystemExit(
                 f"{path} was made for {len(plan['labels'])} channels, not {len(labels)}"
@@ -486,9 +638,13 @@ def load_plan(stream):
         if isinstance(entropy, int)
         else 0
     )
+    rng = np.random.default_rng(seed)
     plan = {
         "seed": seed,
-        "conditions": coadapt.session_plan(np.random.default_rng(seed)),
+        "protocol": args.protocol,
+        "conditions": coadapt.gain_session_plan(rng)
+        if GAIN_PROTOCOL
+        else coadapt.session_plan(rng),
         "labels": labels,
         "channels": channels,
         "decoder_file": source,

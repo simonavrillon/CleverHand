@@ -188,6 +188,11 @@ class WienerFilter:
         self.history[0] = self._z(u)
         return np.append(self.history.ravel(), 1.0)
 
+    def activity(self, U):
+        """Features (T, C) of envelopes ``U`` (T, C) above rest (the floor), 0 at or below it."""
+        rest = self._z(self.floor if self.floor is not None else np.zeros_like(self.mean))
+        return np.clip(self._z(U) - rest, 0, None)
+
     def step(self, u):
         """Velocity (2,) for this frame's envelope ``u`` (C,)."""
         return self.output(self.push(u) @ self.weights)
