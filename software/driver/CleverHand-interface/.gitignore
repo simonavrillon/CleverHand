@@ -8,3 +8,5 @@ build/
 *.npz
 data/
 .venv/
+# local working doc (its links in AGENTS.md / README resolve on the author's machine only)
+docs/experiments.md

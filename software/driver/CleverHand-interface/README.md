@@ -10,7 +10,7 @@ electrodes, the DRY_ELEC_6CH_THIN), worn around the forearm.
 | `firmware/uctrl_teensy/` | the Teensy controller firmware (serial protocol v4.1) |
 | `examples/` | live-plot, hand-tracking and cursor-control windows |
 | `tests/` | driver tests against a simulated Teensy on a pseudo-terminal |
-| `docs/` | `serial_protocol.md` (host ↔ Teensy protocol), `experiments.md` (03/04 design notes), `ads1293.pdf` (the ADS1293 datasheet) |
+| `docs/` | `serial_protocol.md` (host ↔ Teensy protocol), `experiments.md` (03/04 design notes), `running_01.md`, `running_02.md` and `running_03_04.md` (how to run a session), `ads1293.pdf` (the ADS1293 datasheet) |
 
 ## Contents
 

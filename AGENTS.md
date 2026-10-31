@@ -27,6 +27,7 @@ author's machine.
 | `software/driver/CleverHand-interface/AGENTS.md` | contributors | driver conventions (code, tests, protocol boundary) |
 | `software/driver/CleverHand-interface/docs/serial_protocol.md` | contributors | the host ↔ Teensy wire protocol (firmware v4.1) |
 | `software/driver/CleverHand-interface/docs/experiments.md` | contributors | why examples 03/04 are designed the way they are |
+| `software/driver/CleverHand-interface/docs/running_01.md`, `running_02.md`, `running_03_04.md` | experimenters | how to run a session of examples 01, 02, and 03/04 |
 | `hardware/CleverHand-hardware/README.md` | hardware builders | boards, manufacturing, module docs |
 
 ## Repository layout
