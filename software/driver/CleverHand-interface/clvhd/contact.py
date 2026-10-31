@@ -16,7 +16,7 @@ OFFSET_DC = 150e-3  # V
 
 
 def check_contact(data):
-    """Contact status of each channel of `data` (N samples x channels, in V, raw).
+    """Contact status of each channel of ``data`` (N samples x channels, in V, raw).
 
     Returns one string per channel: "" (in contact), "flat" (both electrodes
     at the same potential: shorted together, or both off the skin), "poor

@@ -23,6 +23,13 @@ class TestConnect:
             wb.configure(lead_off=True)  # LOD registers read back
             assert wb.set_spi_clock(8_000_000) == 8_000_000
 
+    def test_configure_leaves_the_callers_config_alone(self, sim):
+        mine = clvhd.Config()
+        with clvhd.Wristband(sim.port, expected_modules=13) as wb:
+            cfg = wb.configure(mine, R2=5)
+            cfg.R3[0] = 12  # a list shared with ``mine`` before the deep copy
+        assert mine.R2 == 4 and mine.R3 == [6, 6, 6]
+
     def test_wrong_module_count_raises(self, sim):
         with pytest.raises(clvhd.ControllerError, match="expected 11"):
             clvhd.Wristband(sim.port, expected_modules=11)

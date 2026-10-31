@@ -16,11 +16,11 @@ import numpy as np
 from . import ads1293
 from .protocol import FRAME_DATA, FRAME_SIZE, FRAME_SYNC, crc8_rows
 
-MAX_WAIT_US = 200_000      # wait this long for a late module, then output NaN
-FIRST_FRAMES = 256         # frames indexed from the nominal period, before the fit takes over
-ALIGN_MIN_SAMPLES = 256    # samples before a module's fit is used to align
-CLOCK_TAU_S = 20           # time constant of the clock fit
-HISTORY_S = 1.0            # samples kept per module for the alignment
+MAX_WAIT_US = 200_000  # wait this long for a late module, then output NaN
+FIRST_FRAMES = 256  # frames indexed from the nominal period, before the fit takes over
+ALIGN_MIN_SAMPLES = 256  # samples before a module's fit is used to align
+CLOCK_TAU_S = 20  # time constant of the clock fit
+HISTORY_S = 1.0  # samples kept per module for the alignment
 # first samples of each module dropped while the decimation filters settle
 # after START_CONV (measured: from -550 mV back to the input within 5 samples)
 SETTLE_SAMPLES = 8
@@ -35,7 +35,7 @@ class LinearClock:
     """
 
     def __init__(self, forgetting):
-        self.lam = forgetting
+        self.forgetting = forgetting
         self.n = 0
         self.S = self.Sx = self.Sy = self.Sxx = self.Sxy = 0.0
         self.x0 = self.y0 = 0.0
@@ -49,8 +49,8 @@ class LinearClock:
         if self.n == 0:
             self.x0, self.y0 = x[0], y[0]
         dx, dy = x - self.x0, y - self.y0
-        w = self.lam ** np.arange(m - 1, -1, -1)  # weight of each new point
-        decay = self.lam ** m
+        w = self.forgetting ** np.arange(m - 1, -1, -1)  # weight of each new point
+        decay = self.forgetting**m
         self.S = decay * self.S + w.sum()
         self.Sx = decay * self.Sx + (w * dx).sum()
         self.Sy = decay * self.Sy + (w * dy).sum()
@@ -83,7 +83,9 @@ class LinearClock:
         return self.x0 + (np.asarray(y, dtype=np.float64) - self.y0 - self._intercept(b)) / b
 
 
-class _Module:
+class ModuleAligner:
+    """One module's clock fit, sample indexing and recent samples, for the alignment."""
+
     def __init__(self, nominal_period_us, forgetting, keep):
         self.T = nominal_period_us
         self.clock = LinearClock(forgetting)
@@ -132,8 +134,8 @@ class _Module:
             # (so tolerates nearly a period of it), in slices short enough
             # that extrapolating a young fit stays accurate
             m = max(16, self.clock.n // 4)
-            k = np.rint(self.clock.inverse(t[i:i + m])).astype(np.int64)
-            self._accept(k, t[i:i + m], volts[i:i + m])
+            k = np.rint(self.clock.inverse(t[i : i + m])).astype(np.int64)
+            self._accept(k, t[i : i + m], volts[i : i + m])
             i += m
 
     def _first_indices(self, t):
@@ -168,8 +170,8 @@ class _Module:
         self.k_last, self.t_last = int(k[-1]), float(t[-1])
         self.clock.update(k, t)
 
-        self.k = np.concatenate([self.k, k])[-self.keep:]
-        self.v = np.concatenate([self.v, volts])[-self.keep:]
+        self.k = np.concatenate([self.k, k])[-self.keep :]
+        self.v = np.concatenate([self.v, volts])[-self.keep :]
 
     def values_at(self, ks):
         """Values at integer indices (NaN where the sample is missing)."""
@@ -207,7 +209,7 @@ class Stream:
 
     def __init__(self, ctrl, nb_modules, cfg):
         self.ctrl = ctrl
-        self.nb = nb_modules
+        self.nb_modules = nb_modules
         self.cfg = cfg
         self.nominal_rate = cfg.odr()
         self.adc_max = cfg.adc_max()
@@ -220,12 +222,12 @@ class Stream:
         T = 1e6 / self.nominal_rate
         lam = 1 - 1 / (CLOCK_TAU_S * self.nominal_rate)
         keep = int(HISTORY_S * self.nominal_rate) + 64
-        self.modules = [_Module(T, lam, keep) for _ in range(self.nb)]
+        self.modules = [ModuleAligner(T, lam, keep) for _ in range(self.nb_modules)]
         self.rx = bytearray()
         self.crc_errors = 0
         self._resyncing = False
         self.next_k = 0
-        self.latest_t = 0.0
+        self.t_latest = 0.0
         self.block_start = None
         self.block_min = 0.0
         self.block_mins = []
@@ -233,7 +235,7 @@ class Stream:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._error = None
-        self.ctrl.start_stream((1 << self.nb) - 1, self.cfg.drdy_mask())
+        self.ctrl.start_stream((1 << self.nb_modules) - 1, self.cfg.drdy_mask())
         self._thread = threading.Thread(target=self._drain, name="clvhd-reader", daemon=True)
         self._thread.start()
         self.running = True
@@ -281,12 +283,14 @@ class Stream:
         if len(frames):
             module = frames[:, 2]
             ts32 = np.ascontiguousarray(frames[:, 7:11]).view("<u4")[:, 0]
-            volts = ads1293.ecg_volts(frames[:, 12:21].reshape(-1, 3, 3), self.adc_max, self.cfg.enable)
+            volts = ads1293.ecg_volts(
+                frames[:, 12:21].reshape(-1, 3, 3), self.adc_max, self.cfg.enable
+            )
             for m in np.unique(module):
-                if m < self.nb:
+                if m < self.nb_modules:
                     sel = module == m
                     self.modules[m].add(ts32[sel], volts[sel])
-            self.latest_t = max([self.latest_t, *(mod.t_last for mod in self.modules)])
+            self.t_latest = max([self.t_latest, *(mod.t_last for mod in self.modules)])
         return self._emit()
 
     def _parse(self):
@@ -295,7 +299,7 @@ class Stream:
         pos, out = 0, []
         while len(buf) - pos >= FRAME_SIZE:
             k = (len(buf) - pos) // FRAME_SIZE
-            rows = buf[pos:pos + k * FRAME_SIZE].reshape(k, FRAME_SIZE)
+            rows = buf[pos : pos + k * FRAME_SIZE].reshape(k, FRAME_SIZE)
             ok = (rows[:, 0] == FRAME_SYNC) & (crc8_rows(rows[:, 1:-1]) == rows[:, -1])
             n_ok = k if ok.all() else int(np.argmin(ok))
             out.append(rows[:n_ok])
@@ -315,7 +319,7 @@ class Stream:
         # the smallest (host - device) difference is the one with the least
         # transfer latency; keep the minimum over the last ten 1 s blocks
         now = time.monotonic()
-        diff = now - self.latest_t * 1e-6
+        diff = now - self.t_latest * 1e-6
         if self.block_start is None or now - self.block_start > 1.0:
             if self.block_start is not None:
                 self.block_mins = [*self.block_mins, self.block_min][-10:]
@@ -325,8 +329,8 @@ class Stream:
         return min([self.block_min, *self.block_mins])
 
     def _emit(self):
-        empty = (np.zeros(0), np.zeros(0), np.zeros((0, 3 * self.nb)))
-        if self.latest_t <= 0:
+        empty = (np.zeros(0), np.zeros(0), np.zeros((0, 3 * self.nb_modules)))
+        if self.t_latest <= 0:
             return empty
         offset = self._host_offset()
         m0 = self.modules[0]
@@ -345,17 +349,17 @@ class Stream:
                 reached = t < mod.clock.predict(mod.k_last)
             else:
                 reached = np.zeros(len(ks), dtype=bool)
-            ok &= reached | (self.latest_t - t >= MAX_WAIT_US)
+            ok &= reached | (self.t_latest - t >= MAX_WAIT_US)
         n = len(ks) if ok.all() else int(np.argmin(ok))
         if n == 0:
             return empty
         ks, t = ks[:n], t[:n]
 
-        data = np.full((n, 3 * self.nb), np.nan)
+        data = np.full((n, 3 * self.nb_modules), np.nan)
         data[:, 0:3] = m0.values_at(ks)
-        for b, mod in enumerate(self.modules[1:], start=1):
+        for m, mod in enumerate(self.modules[1:], start=1):
             if mod.samples >= ALIGN_MIN_SAMPLES:
-                data[:, 3 * b:3 * b + 3] = mod.interpolate(t)
+                data[:, 3 * m : 3 * m + 3] = mod.interpolate(t)
         self.next_k += n
         t_device = t * 1e-6
         return t_device + offset, t_device, data
@@ -366,6 +370,13 @@ class Stream:
         rate0 = self.modules[0].rate()
         for mod in self.modules:
             r = mod.rate()
-            out.append(dict(samples=mod.samples, dropped=mod.dropped, duplicates=mod.duplicates,
-                            rate_hz=r, ppm=(r / rate0 - 1) * 1e6 if rate0 > 0 and r > 0 else 0.0))
+            out.append(
+                dict(
+                    samples=mod.samples,
+                    dropped=mod.dropped,
+                    duplicates=mod.duplicates,
+                    rate_hz=r,
+                    ppm=(r / rate0 - 1) * 1e6 if rate0 > 0 and r > 0 else 0.0,
+                )
+            )
         return out

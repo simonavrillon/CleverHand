@@ -27,7 +27,8 @@ START_CONV, STANDBY = 0x01, 0x02
 VREF = 2.4
 INA_GAIN = 3.5
 
-R2_CODES = {4: 0b0001, 5: 0b0010, 6: 0b0100, 8: 0b1000}
+R2_BITS = {4: 0b0001, 5: 0b0010, 6: 0b0100, 8: 0b1000}  # R2_RATE is a bit field
+# R3_RATE_CH: register encoding
 R3_CODES = {4: 1, 6: 2, 8: 4, 12: 8, 16: 16, 32: 32, 64: 64, 128: 128}
 
 
@@ -43,10 +44,13 @@ class Config:
     200 kHz with R1=4, R2=4, R3=6 gives 2083 sps, 420 Hz bandwidth and
     3.4 uVrms noise (datasheet table 10).
     """
-    route: list = field(default_factory=lambda: [[4, 5], [1, 2], [2, 3]])  # (+, -) input of each channel
+
+    # (+, -) input of each channel
+    route: list = field(default_factory=lambda: [[4, 5], [1, 2], [2, 3]])
     enable: list = field(default_factory=lambda: [True, True, True])
     high_res: list = field(default_factory=lambda: [True, True, True])
-    high_freq: list = field(default_factory=lambda: [True, True, True])  # clock_hz / 20 (else / 40) modulator
+    # clock_hz / 20 (else / 40) modulator
+    high_freq: list = field(default_factory=lambda: [True, True, True])
     R1: list = field(default_factory=lambda: [4, 4, 4])  # 2 or 4
     R2: int = 4  # 4, 5, 6 or 8
     R3: list = field(default_factory=lambda: [6, 6, 6])  # 4, 6, 8, 12, 16, 32, 64 or 128
@@ -70,13 +74,13 @@ class Config:
 
     def used_inputs(self):
         """Inputs used by the enabled channels (bit i: IN(i+1))."""
-        mask = 0
+        pins = 0
         for ch in range(3):
             if self.enable[ch]:
                 for pin in self.route[ch]:
                     if 1 <= pin <= 6:
-                        mask |= 1 << (pin - 1)
-        return mask
+                        pins |= 1 << (pin - 1)
+        return pins
 
     def drdy_mask(self):
         """DATA_STATUS bits set when every enabled ECG channel has a new sample."""
@@ -87,14 +91,19 @@ class Config:
         out = []
         for ch in range(3):
             r3_6_or_12 = self.R3[ch] in (6, 12)
-            out.append({4: (0xF30000, 0x800000), 8: (0xF30000, 0x800000),
-                        5: (0xB964F0, 0xC35000), 6: (0xE6A900, 0xF30000)}
-                       [self.R2][0 if r3_6_or_12 else 1])
+            out.append(
+                {
+                    4: (0xF30000, 0x800000),
+                    8: (0xF30000, 0x800000),
+                    5: (0xB964F0, 0xC35000),
+                    6: (0xE6A900, 0xF30000),
+                }[self.R2][0 if r3_6_or_12 else 1]
+            )
         return np.array(out, dtype=np.float64)
 
     def validate(self):
-        if self.R2 not in R2_CODES:
-            raise ValueError(f"R2 must be one of {sorted(R2_CODES)}")
+        if self.R2 not in R2_BITS:
+            raise ValueError(f"R2 must be one of {sorted(R2_BITS)}")
         for ch in range(3):
             if self.R1[ch] not in (2, 4):
                 raise ValueError("R1 must be 2 or 4")
@@ -127,10 +136,15 @@ def register_values(cfg):
     regs.append((LOD_CURRENT, 1 if cfg.lead_off else 0))  # 8 nA steps
     # AFE_SHDN_CN: bit ch shuts the INA down, bit ch+3 the modulator
     regs.append((AFE_SHDN_CN, sum(0b001001 << ch for ch in range(3) if not cfg.enable[ch])))
-    regs.append((AFE_RES, sum((1 << ch) * bool(cfg.high_res[ch]) for ch in range(3))
-                 | sum((8 << ch) * bool(cfg.high_freq[ch]) for ch in range(3))))
+    regs.append(
+        (
+            AFE_RES,
+            sum((1 << ch) * bool(cfg.high_res[ch]) for ch in range(3))
+            | sum((8 << ch) * bool(cfg.high_freq[ch]) for ch in range(3)),
+        )
+    )
     regs.append((R1_RATE, sum(1 << ch for ch in range(3) if cfg.R1[ch] == 2)))
-    regs.append((R2_RATE, R2_CODES[cfg.R2]))
+    regs.append((R2_RATE, R2_BITS[cfg.R2]))
     regs.extend((R3_RATE_CH + ch, R3_CODES[cfg.R3[ch]]) for ch in range(3))
     regs.append((DRDYB_SRC, 0x08))  # data ready follows channel 1 ECG, as in the datasheet examples
     regs.append((OSC_CN, 0x04))  # STRTCLK: clock the digital part from the module's own crystal
@@ -175,11 +189,24 @@ def ecg_volts(codes, adc_max, enable):
     return volts
 
 
-_STATUS_BITS = ["common-mode out of range", "right-leg drive near rail", "low battery",
-                "lead off", "ch1 out of range", "ch2 out of range", "ch3 out of range",
-                "digital sync error"]
-_RANGE_BITS = {0: "INA out of range", 1: "INA (+) near (+) rail", 2: "INA (+) near (-) rail",
-               3: "INA (-) near (+) rail", 4: "INA (-) near (-) rail", 6: "modulator over range"}
+_STATUS_BITS = [
+    "common-mode out of range",
+    "right-leg drive near rail",
+    "low battery",
+    "lead off",
+    "ch1 out of range",
+    "ch2 out of range",
+    "ch3 out of range",
+    "digital sync error",
+]
+_RANGE_BITS = {
+    0: "INA out of range",
+    1: "INA (+) near (+) rail",
+    2: "INA (+) near (-) rail",
+    3: "INA (-) near (+) rail",
+    4: "INA (-) near (-) rail",
+    6: "modulator over range",
+}
 
 
 def describe_errors(err):

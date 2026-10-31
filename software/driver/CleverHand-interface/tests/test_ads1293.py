@@ -23,6 +23,10 @@ def test_config_rejects_a_missing_rld_module():
 
 def test_lead_off_registers_and_flags():
     regs = dict(ads1293.register_values(clvhd.Config(lead_off=True)))
-    assert (regs[ads1293.LOD_CN], regs[ads1293.LOD_EN], regs[ads1293.LOD_CURRENT]) == (0x00, 0x1F, 1)
+    assert (regs[ads1293.LOD_CN], regs[ads1293.LOD_EN], regs[ads1293.LOD_CURRENT]) == (
+        0x00,
+        0x1F,
+        1,
+    )
     assert dict(ads1293.register_values(clvhd.Config()))[ads1293.LOD_CN] == 0x08  # shut down
     assert ads1293.describe_errors([0x10, 0x08, 0, 0, 0, 0, 0]) == "lead off, IN5 lead off"

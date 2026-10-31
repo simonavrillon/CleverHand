@@ -1,5 +1,7 @@
 """High-level interface to the wristband: Teensy controller + chained ADS1293 modules."""
 
+import copy
+
 from . import ads1293
 from .protocol import INIT_TOO_MANY, Controller, ControllerError, find_port
 from .stream import Stream
@@ -13,7 +15,7 @@ class Wristband:
     ...     with wb.stream() as s:
     ...         t_host, t_device, data = s.read(0.05)
 
-    ``expected_modules``: raise unless exactly this many modules are found
+    ``expected_modules``: raises unless exactly this many modules are found
     (0 accepts any number). Addressing only runs once per power-up, so on a
     mismatch power-cycle the wristband (Teensy included) and retry.
     ``spi_clock``: the Teensy starts at 4 MHz, too slow to read 13 modules
@@ -35,9 +37,13 @@ class Wristband:
                 raise ControllerError(
                     f"Found {self.nb_modules} modules, expected {expected_modules}. "
                     "Power-cycle the wristband (Teensy included) and retry; if it "
-                    f"persists, check the ribbon cable after module {self.nb_modules}")
+                    f"persists, check the ribbon cable after module {self.nb_modules}"
+                )
             if self.nb_modules == 0:
-                raise ControllerError("No module found")
+                raise ControllerError(
+                    "No module found. Check that the modules are powered and that the ribbon "
+                    "cable is plugged into the Teensy, then power-cycle the wristband and retry"
+                )
             revid = self.ctrl.read_regs(self.mask, ads1293.REVID, 1)[:, 0]
             not_ads = [m for m in range(self.nb_modules) if revid[m] != 0x01]
             if not_ads:
@@ -57,8 +63,9 @@ class Wristband:
 
     def configure(self, config=None, **kwargs):
         """Configure every module with ``config`` (default: ``ads1293.Config()``);
-        keyword arguments override its fields, e.g. ``configure(R3=[12, 12, 12])``."""
-        cfg = config or ads1293.Config()
+        keyword arguments override its fields, e.g. ``configure(R3=[12, 12, 12])``.
+        The passed ``config`` is not modified."""
+        cfg = copy.deepcopy(config) if config is not None else ads1293.Config()
         for key, val in kwargs.items():
             if not hasattr(cfg, key):
                 raise TypeError(f"Unknown configuration field {key!r}")

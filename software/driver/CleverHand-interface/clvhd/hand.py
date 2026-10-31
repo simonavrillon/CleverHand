@@ -21,20 +21,42 @@ from pathlib import Path
 
 import numpy as np
 
-MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/"
-             "float16/latest/hand_landmarker.task")
+MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/"
+    "float16/latest/hand_landmarker.task"
+)
 MODEL_DIR = Path.home() / ".cache" / "clvhd"
 
 HAND_LANDMARKS = [
-    "wrist", "thumb_cmc", "thumb_mcp", "thumb_ip", "thumb_tip",
-    "index_mcp", "index_pip", "index_dip", "index_tip",
-    "middle_mcp", "middle_pip", "middle_dip", "middle_tip",
-    "ring_mcp", "ring_pip", "ring_dip", "ring_tip",
-    "pinky_mcp", "pinky_pip", "pinky_dip", "pinky_tip",
+    "wrist",
+    "thumb_cmc",
+    "thumb_mcp",
+    "thumb_ip",
+    "thumb_tip",
+    "index_mcp",
+    "index_pip",
+    "index_dip",
+    "index_tip",
+    "middle_mcp",
+    "middle_pip",
+    "middle_dip",
+    "middle_tip",
+    "ring_mcp",
+    "ring_pip",
+    "ring_dip",
+    "ring_tip",
+    "pinky_mcp",
+    "pinky_pip",
+    "pinky_dip",
+    "pinky_tip",
 ]
 FINGERS = {  # landmark chains, from the wrist (or the thumb's CMC) to the tip
-    "thumb": (1, 2, 3, 4), "index": (0, 5, 6, 7, 8), "middle": (0, 9, 10, 11, 12),
-    "ring": (0, 13, 14, 15, 16), "pinky": (0, 17, 18, 19, 20)}
+    "thumb": (1, 2, 3, 4),
+    "index": (0, 5, 6, 7, 8),
+    "middle": (0, 9, 10, 11, 12),
+    "ring": (0, 13, 14, 15, 16),
+    "pinky": (0, 17, 18, 19, 20),
+}
 TIPS = {name: chain[-1] for name, chain in FINGERS.items()}  # each fingertip's landmark
 KEEP_FRAMES = 3000  # results kept until read()
 
@@ -48,6 +70,7 @@ class HandFrame:
     ``hand_world``: (21, 3) in m, origin at the hand's centre, with the camera's
     axes (x right, y down, z away from the camera).
     """
+
     t: float
     index: int
     handedness: str
@@ -79,8 +102,9 @@ def finger_flexion(hand_world):
 def pinch_aperture(hand_world):
     """Distance between the thumb and index tips (cm), from ``hand_world`` (..., 21, 3) in m."""
     hand_world = np.asarray(hand_world, dtype=float)
-    return 100 * np.linalg.norm(hand_world[..., TIPS["thumb"], :] - hand_world[..., TIPS["index"], :],
-                                axis=-1)
+    return 100 * np.linalg.norm(
+        hand_world[..., TIPS["thumb"], :] - hand_world[..., TIPS["index"], :], axis=-1
+    )
 
 
 def model_path():
@@ -107,8 +131,9 @@ class HandTracker:
     the real hand (and as a selfie view looks natural).
     """
 
-    def __init__(self, camera=0, mirror=True, width=None, height=None, fps=None,
-                 min_confidence=0.5):
+    def __init__(
+        self, camera=0, mirror=True, width=None, height=None, fps=None, min_confidence=0.5
+    ):
         self.camera, self.mirror = camera, mirror
         self.size, self.fps_request = (width, height), fps
         self.min_confidence = min_confidence
@@ -118,11 +143,14 @@ class HandTracker:
         import cv2
         import mediapipe as mp
         from mediapipe.tasks.python import BaseOptions, vision
+
         self._cv2, self._mp = cv2, mp
         self.cap = cv2.VideoCapture(self.camera)
         if not self.cap.isOpened():
-            raise RuntimeError(f"Cannot open camera {self.camera!r} (on macOS, allow camera access "
-                               "for the terminal in System Settings > Privacy & Security > Camera)")
+            raise RuntimeError(
+                f"Cannot open camera {self.camera!r} (on macOS, allow camera access "
+                "for the terminal in System Settings > Privacy & Security > Camera)"
+            )
         if self.size[0]:
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.size[0])
         if self.size[1]:
@@ -132,10 +160,16 @@ class HandTracker:
         self.is_file = isinstance(self.camera, str)
         self.nominal_fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
         conf = self.min_confidence
-        self.hand_model = vision.HandLandmarker.create_from_options(vision.HandLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=str(model_path())),
-            running_mode=vision.RunningMode.VIDEO, num_hands=1, min_hand_detection_confidence=conf,
-            min_hand_presence_confidence=conf, min_tracking_confidence=conf))
+        self.hand_model = vision.HandLandmarker.create_from_options(
+            vision.HandLandmarkerOptions(
+                base_options=BaseOptions(model_asset_path=str(model_path())),
+                running_mode=vision.RunningMode.VIDEO,
+                num_hands=1,
+                min_hand_detection_confidence=conf,
+                min_hand_presence_confidence=conf,
+                min_tracking_confidence=conf,
+            )
+        )
 
         self._new = threading.Condition()
         self._frame = None  # (index, t, BGR image) of the latest camera frame
@@ -146,8 +180,10 @@ class HandTracker:
         self._error = None
         self.captured = self.processed = 0
         self._last_ms = -1
-        self._threads = [threading.Thread(target=self._guard, args=(fn,), name=name, daemon=True)
-                         for fn, name in ((self._capture, "clvhd-camera"), (self._process, "clvhd-hand"))]
+        self._threads = [
+            threading.Thread(target=self._guard, args=(fn,), name=name, daemon=True)
+            for fn, name in ((self._capture, "clvhd-camera"), (self._process, "clvhd-hand"))
+        ]
         for th in self._threads:
             th.start()
         self.running = True
@@ -186,8 +222,11 @@ class HandTracker:
             return self._latest
 
     def stats(self):
-        return {"captured": self.captured, "processed": self.processed,
-                "nominal_fps": self.nominal_fps}
+        return {
+            "captured": self.captured,
+            "processed": self.processed,
+            "nominal_fps": self.nominal_fps,
+        }
 
     def _guard(self, fn):
         try:
@@ -200,11 +239,11 @@ class HandTracker:
 
     def _capture(self):
         period = 1 / self.nominal_fps
-        next_t = time.monotonic()
+        t_next = time.monotonic()
         while not self._stop.is_set():
             if self.is_file:  # a file plays at its frame rate, as a camera would deliver it
-                next_t += period
-                time.sleep(max(0.0, next_t - time.monotonic()))
+                t_next += period
+                time.sleep(max(0.0, t_next - time.monotonic()))
             ok, image = self.cap.read()
             t = time.monotonic()  # when the frame reached us: about one frame after its exposure
             if not ok:
@@ -250,14 +289,28 @@ class HandTracker:
 
 # one camera frame as a fixed-size record, to stream to a file (clvhd.bids.RawRecording);
 # right: 1 right hand, 0 left, NaN no hand
-FRAME_DTYPE = np.dtype([("t", "<f8"), ("index", "<i8"), ("right", "<f4"), ("score", "<f4"),
-                        ("hand_image", "<f4", (21, 3)), ("hand_world", "<f4", (21, 3))])
+FRAME_DTYPE = np.dtype(
+    [
+        ("t", "<f8"),
+        ("index", "<i8"),
+        ("right", "<f4"),
+        ("score", "<f4"),
+        ("hand_image", "<f4", (21, 3)),
+        ("hand_world", "<f4", (21, 3)),
+    ]
+)
 
 
 def stack(frames):
     """HandFrames as ``FRAME_DTYPE`` records."""
     out = np.zeros(len(frames), FRAME_DTYPE)
     for i, f in enumerate(frames):
-        out[i] = (f.t, f.index, float(f.handedness == "Right") if f.handedness else np.nan, f.score,
-                  f.hand_image, f.hand_world)
+        out[i] = (
+            f.t,
+            f.index,
+            float(f.handedness == "Right") if f.handedness else np.nan,
+            f.score,
+            f.hand_image,
+            f.hand_world,
+        )
     return out

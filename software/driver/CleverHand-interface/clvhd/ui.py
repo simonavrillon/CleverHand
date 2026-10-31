@@ -20,16 +20,29 @@ from .filters import BAND, CausalFilter, emg_band
 from .hand import stack
 
 # one colour per module (cycled past 13), its channels a shade apart; flat channels muted
-MODULE_COLORS = ["#9dd0ff", "#9de9be", "#ffd99f", "#e7c1ff", "#ffb7c3", "#d4f09a", "#ffb98a",
-                 "#aab4ff", "#8fe6f0", "#f0f0a0", "#ff9ee6", "#e0c9a6", "#ff9a9a"]
+MODULE_COLORS = [
+    "#9dd0ff",
+    "#9de9be",
+    "#ffd99f",
+    "#e7c1ff",
+    "#ffb7c3",
+    "#d4f09a",
+    "#ffb98a",
+    "#aab4ff",
+    "#8fe6f0",
+    "#f0f0a0",
+    "#ff9ee6",
+    "#e0c9a6",
+    "#ff9a9a",
+]
 FLAT_COLOR = "#b7b7b7"
 BACKGROUND_COLOR, TEXT_COLOR = "#1f1f1f", "#ffffff"
 FONT = "Open Sans"  # the system font when not installed
-FONT_MESSAGE = 24    # point size of every text screen's main text (02's cue window, 03, 04)
-FONT_INFO = 12       # the small info line under it, for the experimenter
+FONT_MESSAGE = 24  # point size of every text screen's main text (02's cue window, 03, 04)
+FONT_INFO = 12  # the small info line under it, for the experimenter
 FONT_COUNTDOWN = 40  # the cue window's seconds countdown
 OFFSET = 0.5  # mV between channels: ch1 at +0.5, ch2 at 0, ch3 at -0.5, in a -1 to 1 mV plot
-CONTACT_WINDOW = 1.0  # s of raw data the contact check looks at
+CONTACT_WINDOW_S = 1.0  # s of raw data the contact check looks at
 LED_ON = (0, 16, 16)  # dim: the LEDs share the Teensy's 3.3 V with the modules
 BUTTON_SIZE = 30  # px
 RECORD_COLOR = MODULE_COLORS[12]
@@ -41,10 +54,12 @@ TARGET_COLORS = [c for c in MODULE_COLORS if c != HIT_COLOR]
 # the task field drawn as a tablet's screen in light lines, its targets as app icons
 TABLET_BEZEL_CM = 0.9  # the frame around the screen (the window fits it, with 0.5 cm to spare)
 ICON_CORNER = 0.225  # an icon's corner radius, fraction of its side
-BULB_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" '
-            'fill="none" stroke="{}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
-            '<path d="M8.5 14.5a6 6 0 1 1 7 0c-.6.5-1 1.2-1 2v.5h-5v-.5c0-.8-.4-1.5-1-2z"/>'
-            '<path d="M9.5 20h5"/><path d="M10.5 22.5h3"/></svg>')
+BULB_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" '
+    'fill="none" stroke="{}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M8.5 14.5a6 6 0 1 1 7 0c-.6.5-1 1.2-1 2v.5h-5v-.5c0-.8-.4-1.5-1-2z"/>'
+    '<path d="M9.5 20h5"/><path d="M10.5 22.5h3"/></svg>'
+)
 
 pg.setConfigOptions(background=BACKGROUND_COLOR, foreground=TEXT_COLOR, imageAxisOrder="row-major")
 
@@ -103,7 +118,10 @@ def channel_color(m, ch):
 def led_button(m):
     """Round button with a bulb in the module's colour, filled while its LEDs are on."""
     icon = QtGui.QIcon()
-    for color, state in ((module_color(m), QtGui.QIcon.State.Off), (BACKGROUND_COLOR, QtGui.QIcon.State.On)):
+    for color, state in (
+        (module_color(m), QtGui.QIcon.State.Off),
+        (BACKGROUND_COLOR, QtGui.QIcon.State.On),
+    ):
         pixmap = QtGui.QPixmap()
         pixmap.loadFromData(BULB_SVG.format(color).encode(), "SVG")
         icon.addPixmap(pixmap, QtGui.QIcon.Mode.Normal, state)
@@ -116,7 +134,8 @@ def led_button(m):
     button.setStyleSheet(
         f"QToolButton {{ border: 1px solid {module_color(m)}; border-radius: {BUTTON_SIZE // 2}px;"
         f" background: transparent; }}"
-        f"QToolButton:checked {{ background-color: {module_color(m)}; }}")
+        f"QToolButton:checked {{ background-color: {module_color(m)}; }}"
+    )
     return button
 
 
@@ -147,7 +166,8 @@ class EmgPanel(QtWidgets.QWidget):
         fs = stream.nominal_rate
         self.t = np.full(int(window * fs), np.nan)
         self.y = np.full((len(self.t), 3 * nb_modules), np.nan)  # mV, filtered
-        self.raw = np.full((int(CONTACT_WINDOW * fs), 3 * nb_modules), np.nan)  # V, for the contact check
+        # V, for the contact check
+        self.contact_data = np.full((int(CONTACT_WINDOW_S * fs), 3 * nb_modules), np.nan)
         self.filter = CausalFilter(emg_band(fs, BAND, powerline))
         self.t0 = None  # host time of the first complete sample
         self.contact_total = QtWidgets.QLabel()
@@ -159,7 +179,7 @@ class EmgPanel(QtWidgets.QWidget):
         widest = QtGui.QFontMetrics(QtGui.QFont(FONT)).horizontalAdvance("ch1 poor contact")
         self.graphs.ci.layout.setColumnFixedWidth(1, widest + BUTTON_SIZE + 20)
         self.curves, self.status_texts = [], []
-        self.led_buttons = []  # (proxy, status plot) per module
+        self.led_buttons = []  # per module, its button's proxy (in its status plot)
         for m in range(nb_modules):
             last_row = m == nb_modules - 1
             traces = fixed_plot(self.graphs, m, 0, (-1, 1), last_row)
@@ -171,8 +191,10 @@ class EmgPanel(QtWidgets.QWidget):
                 self.time_plot = traces
             else:
                 traces.setXLink(self.time_plot)
-            self.curves += [traces.plot(pen=pg.mkPen(channel_color(m, ch), width=1), connect="finite")
-                            for ch in range(3)]
+            self.curves += [
+                traces.plot(pen=pg.mkPen(channel_color(m, ch), width=1), connect="finite")
+                for ch in range(3)
+            ]
 
             status = fixed_plot(self.graphs, m, 1, (-1, 1), last_row)
             status.hideAxis("left")
@@ -187,10 +209,11 @@ class EmgPanel(QtWidgets.QWidget):
                 self.status_texts.append(text)
             button = led_button(m)
             button.toggled.connect(lambda on, m=m: self.set_leds(m, on))
-            proxy = QtWidgets.QGraphicsProxyWidget(status)  # outside the view box, which clips clicks
+            # in the status plot, outside its view box, which clips clicks
+            proxy = QtWidgets.QGraphicsProxyWidget(status)
             proxy.setWidget(button)
             status.vb.sigResized.connect(lambda vb, proxy=proxy: self.place_button(proxy, vb))
-            self.led_buttons.append((proxy, status))
+            self.led_buttons.append(proxy)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -215,54 +238,69 @@ class EmgPanel(QtWidgets.QWidget):
             self.wb.set_led(m, led, LED_ON if on else (0, 0, 0))
 
     def update_contact(self):
-        if np.isnan(self.raw[0]).all():
-            return  # less than CONTACT_WINDOW received yet
-        status = check_contact(self.raw)
-        self.contact_total.setText(f"{status.count('')} good, {status.count('poor contact')} poor contact, "
-                                   f"{status.count('flat')} flat"
-                                   + (f", {n} no data" if (n := status.count("no data")) else ""))
+        if np.isnan(self.contact_data[0]).all():
+            return  # less than CONTACT_WINDOW_S received yet
+        status = check_contact(self.contact_data)
+        self.contact_total.setText(
+            f"{status.count('')} good, {status.count('poor contact')} poor contact, "
+            f"{status.count('flat')} flat"
+            + (f", {n} no data" if (n := status.count("no data")) else "")
+        )
         for i, state in enumerate(status):
             color = FLAT_COLOR if state in ("flat", "no data") else channel_color(i // 3, i % 3)
             self.curves[i].setPen(pg.mkPen(color, width=1))
             self.status_texts[i].setText(f"ch{i % 3 + 1} {state or 'ok'}", color=color)
 
     def update_data(self):
-        t, t_device, data = self.stream.read(0)  # everything received since the last update
+        t_host, t_device, data = self.stream.read(0)  # everything received since the last update
         for listener in self.listeners:
-            listener(t, t_device, data)
-        self.add(t, data)
+            listener(t_host, t_device, data)
+        self.add(t_host, data)
 
-    def add(self, t, data):
-        """Draw samples ``data`` (V, NaN where missing) at host times ``t``."""
-        if len(t) == 0:
+    def add(self, t_host, data):
+        """Draw samples ``data`` (V, NaN where missing) at host times ``t_host``."""
+        if len(t_host) == 0:
             return
-        k = min(len(t), len(self.raw))
-        self.raw = np.roll(self.raw, -k, axis=0)
-        self.raw[-k:] = data[-k:]
+        k = min(len(t_host), len(self.contact_data))
+        self.contact_data = np.roll(self.contact_data, -k, axis=0)
+        self.contact_data[-k:] = data[-k:]
         start, filtered = self.filter(data * 1e3)  # mV
         if len(filtered) == 0:
             return
-        t, data = t[start:], np.where(np.isnan(data[start:]), np.nan, filtered)  # gaps shown
+        t_host = t_host[start:]
+        data = np.where(np.isnan(data[start:]), np.nan, filtered)  # gaps shown
         if self.t0 is None:
-            self.t0 = t[0]
-        k = min(len(t), len(self.t))
+            self.t0 = t_host[0]
+        k = min(len(t_host), len(self.t))
         self.t = np.roll(self.t, -k)
         self.y = np.roll(self.y, -k, axis=0)
-        self.t[-k:], self.y[-k:] = t[-k:] - self.t0, data[-k:]
+        self.t[-k:], self.y[-k:] = t_host[-k:] - self.t0, data[-k:]
         shown = ~np.isnan(self.t)
         for i, curve in enumerate(self.curves):
             curve.setData(self.t[shown], self.y[shown, i] + (1 - i % 3) * OFFSET)
-        self.time_plot.setXRange(self.t[-1] - self.window, self.t[-1], padding=0)  # the others follow
+        # the others follow
+        self.time_plot.setXRange(self.t[-1] - self.window, self.t[-1], padding=0)
 
 
 def _add_storage_arguments(g):
     """Where the recordings go and in which format."""
-    g.add_argument("--bids-root", type=lambda s: Path(s).expanduser(), default=str(bids.DEFAULT_ROOT),
-                   help="BIDS dataset folder, created if missing (default: %(default)s)")
-    g.add_argument("--format", choices=sorted(bids.FORMATS), default="edf",
-                   help="EMG file format: edf (16 bits, default) or bdf (24 bits)")
-    g.add_argument("--keep-sourcedata", action="store_true",
-                   help="keep the stream in sourcedata/ once the BIDS files are written")
+    g.add_argument(
+        "--bids-root",
+        type=lambda s: Path(s).expanduser(),
+        default=str(bids.DEFAULT_ROOT),
+        help="BIDS dataset folder, created if missing (default: %(default)s)",
+    )
+    g.add_argument(
+        "--format",
+        choices=sorted(bids.FORMATS),
+        default="edf",
+        help="EMG file format: edf (16 bits, default) or bdf (24 bits)",
+    )
+    g.add_argument(
+        "--keep-sourcedata",
+        action="store_true",
+        help="keep the stream in sourcedata/ once the BIDS files are written",
+    )
 
 
 def add_record_arguments(parser):
@@ -274,8 +312,13 @@ def add_record_arguments(parser):
     g.add_argument("--task", default="", help="task label (editable in the window)")
     g.add_argument("--acq", help="acquisition label")
     g.add_argument("--task-description")
-    g.add_argument("--muscle", action="append", default=[], metavar="MODULE=NAME",
-                   help="muscle under a module, e.g. 0=ECR (repeat)")
+    g.add_argument(
+        "--muscle",
+        action="append",
+        default=[],
+        metavar="MODULE=NAME",
+        help="muscle under a module, e.g. 0=ECR (repeat)",
+    )
     g.add_argument("--placement", help="how the band was placed (EMGPlacementSchemeDescription)")
     g.add_argument("--age", type=int)
     g.add_argument("--sex", choices=["M", "F", "O"])
@@ -284,8 +327,10 @@ def add_record_arguments(parser):
 
 def _stats_since(before, after):
     """Per-module stream statistics of a recording: the counts between ``before`` and ``after``."""
-    return [{**a, **{k: a[k] - b[k] for k in ("samples", "dropped", "duplicates")}}
-            for b, a in zip(before, after, strict=True)]
+    return [
+        {**a, **{k: a[k] - b[k] for k in ("samples", "dropped", "duplicates")}}
+        for b, a in zip(before, after, strict=True)
+    ]
 
 
 class RecordBar(QtWidgets.QWidget):
@@ -311,9 +356,12 @@ class RecordBar(QtWidgets.QWidget):
         self.export = {  # what describes every recording, kept in its sourcedata header
             "participant": {"age": args.age, "sex": args.sex, "handedness": args.handedness},
             "muscles": dict(s.split("=", 1) for s in args.muscle),
-            "powerline_freq": panel.powerline, "placement_description": args.placement,
-            "task_description": args.task_description, "file_format": args.format,
-            "event_descriptions": event_descriptions}
+            "powerline_freq": panel.powerline,
+            "placement_description": args.placement,
+            "task_description": args.task_description,
+            "file_format": args.format,
+            "event_descriptions": event_descriptions,
+        }
         self.recording, self.saver, self.result = False, None, None
         panel.listeners.append(self._add_samples)
 
@@ -324,7 +372,9 @@ class RecordBar(QtWidgets.QWidget):
             layout.addWidget(QtWidgets.QLabel(key))
             edit = QtWidgets.QLineEdit(getattr(args, key) or "")
             edit.setFixedWidth(width)
-            edit.setStyleSheet(f"border: 1px solid {FLAT_COLOR}; border-radius: 4px; padding: 2px 4px;")
+            edit.setStyleSheet(
+                f"border: 1px solid {FLAT_COLOR}; border-radius: 4px; padding: 2px 4px;"
+            )
             edit.textChanged.connect(self.refresh)
             layout.addWidget(edit)
             self.fields[key] = edit
@@ -337,7 +387,8 @@ class RecordBar(QtWidgets.QWidget):
             f" color: {RECORD_COLOR}; background: transparent; padding: 0 16px;"
             f" min-height: {BUTTON_SIZE - 2}px; }}"
             f"QPushButton:checked {{ background-color: {RECORD_COLOR}; color: {BACKGROUND_COLOR}; }}"
-            f"QPushButton:disabled {{ border-color: {FLAT_COLOR}; color: {FLAT_COLOR}; }}")
+            f"QPushButton:disabled {{ border-color: {FLAT_COLOR}; color: {FLAT_COLOR}; }}"
+        )
         self.button.toggled.connect(self.toggle)
         layout.addWidget(self.button)
         self.status = QtWidgets.QLabel()
@@ -379,13 +430,21 @@ class RecordBar(QtWidgets.QWidget):
 
     def start(self):
         ent = self.entities()
-        self.ent = bids.Entities(ent.subject, ent.task, ent.session, ent.acquisition,
-                                 bids.next_run(self.root, ent))
+        self.ent = bids.Entities(
+            ent.subject, ent.task, ent.session, ent.acquisition, bids.next_run(self.root, ent)
+        )
         stream = self.panel.stream
-        self.raw = bids.RawRecording(self.root, self.ent, self.wb.config, stream.channel_labels,
-                                     hand=bool(self.camera_fps), camera_fps=self.camera_fps,
-                                     firmware=self.wb.firmware, export=self.export,
-                                     events=self.events)
+        self.raw = bids.RawRecording(
+            self.root,
+            self.ent,
+            self.wb.config,
+            stream.channel_labels,
+            hand=bool(self.camera_fps),
+            camera_fps=self.camera_fps,
+            firmware=self.wb.firmware,
+            export=self.export,
+            events=self.events,
+        )
         self.with_hand = 0
         self.stats_before = stream.stats()
         self.t_start = time.monotonic()
@@ -420,11 +479,18 @@ class RecordBar(QtWidgets.QWidget):
             bad = sum(bool(c) for c in result["contact"])
             coarse = result["coarse"]
             worst = max(coarse, key=coarse.get) if coarse else None
-            self.status.setText(f"saved {self.ent.label()} ({result['duration']:.1f} s"
-                                + (f", {bad} channels marked bad" if bad else "") + ")"
-                                + (f"; {len(coarse)} channels coarse in EDF, up to "
-                                   f"{coarse[worst]:.1f} uV steps ({worst}): --format bdf keeps "
-                                   "24 bits" if coarse else ""))
+            self.status.setText(
+                f"saved {self.ent.label()} ({result['duration']:.1f} s"
+                + (f", {bad} channels marked bad" if bad else "")
+                + ")"
+                + (
+                    f"; {len(coarse)} channels coarse in EDF, up to "
+                    f"{coarse[worst]:.1f} uV steps ({worst}): --format bdf keeps "
+                    "24 bits"
+                    if coarse
+                    else ""
+                )
+            )
         for edit in self.fields.values():
             edit.setEnabled(True)
         self.button.blockSignals(True)
@@ -436,9 +502,14 @@ class RecordBar(QtWidgets.QWidget):
     def tick(self):
         if self.recording:
             elapsed = time.monotonic() - self.t_start
-            self.status.setText(f"recording  {int(elapsed // 60)}:{elapsed % 60:04.1f}"
-                                + (f", hand in {self.with_hand} of {self.raw.frames} frames"
-                                   if self.camera_fps else ""))
+            self.status.setText(
+                f"recording  {int(elapsed // 60)}:{elapsed % 60:04.1f}"
+                + (
+                    f", hand in {self.with_hand} of {self.raw.frames} frames"
+                    if self.camera_fps
+                    else ""
+                )
+            )
             self.raw.flush()
         elif self.saver and not self.saver.is_alive():
             self._done()
@@ -485,7 +556,9 @@ def add_device_arguments(parser):
     """The command-line options of the wristband: its port, modules and the mains notch."""
     parser.add_argument("--port", help="serial port of the Teensy (default: first Teensy found)")
     parser.add_argument("--modules", type=int, default=13, help="expected number of modules")
-    parser.add_argument("--powerline", type=float, default=50, help="mains frequency notched (Hz, 0: none)")
+    parser.add_argument(
+        "--powerline", type=float, default=50, help="mains frequency notched (Hz, 0: none)"
+    )
 
 
 def add_task_arguments(parser, task):
@@ -495,12 +568,20 @@ def add_task_arguments(parser, task):
     parser.add_argument("--task", default=task, help="BIDS task label")
     add_device_arguments(parser)
     parser.add_argument("--seed", type=int, help="random seed (default: random)")
-    parser.add_argument("--screen-width-cm", type=float,
-                        help="visible width of the screen, to draw in cm (default: as the screen "
-                             "reports it)")
-    parser.add_argument("--field-cm", type=float, nargs=2, default=FIELD_CM, metavar=("WIDTH", "HEIGHT"),
-                        help="task field, centred on the screen (default: an 11-inch iPad, "
-                             "%(default)s; the co-adaptation paper's display: 46.5 24.5)")
+    parser.add_argument(
+        "--screen-width-cm",
+        type=float,
+        help="visible width of the screen, to draw in cm (default: as the screen reports it)",
+    )
+    parser.add_argument(
+        "--field-cm",
+        type=float,
+        nargs=2,
+        default=FIELD_CM,
+        metavar=("WIDTH", "HEIGHT"),
+        help="task field, centred on the screen (default: an 11-inch iPad, "
+        "%(default)s; the co-adaptation paper's display: 46.5 24.5)",
+    )
     parser.add_argument("--cursor-radius-cm", type=float, default=0.4)
     parser.add_argument("--windowed", action="store_true", help="a window instead of full screen")
     _add_storage_arguments(parser)
@@ -523,8 +604,9 @@ class TaskWindow(QtWidgets.QWidget):
         self.channels = np.array(channels)
         labels = stream.channel_labels
         left_out = [lb for c, lb in enumerate(labels) if c not in set(channels)]
-        self.channel_info = (f"Decoder: {len(channels)} of {len(labels)} channels"
-                             + (f", left out: {', '.join(left_out)}" if left_out else ""))
+        self.channel_info = f"Decoder: {len(channels)} of {len(labels)} channels" + (
+            f", left out: {', '.join(left_out)}" if left_out else ""
+        )
         self.envelope = Envelope(stream.nominal_rate, len(labels), args.powerline, band)
         self.state, self.frames, self.last_paint = "ready", [], 0.0
         # set for real by start_recording(); declared here so tick() can read them
@@ -550,8 +632,10 @@ class TaskWindow(QtWidgets.QWidget):
 
     def resizeEvent(self, event):
         screen = self.screen()
-        width_cm = self.args.screen_width_cm or screen.physicalSize().width() / 10 * \
-            self.width() / screen.size().width()
+        width_cm = (
+            self.args.screen_width_cm
+            or screen.physicalSize().width() / 10 * self.width() / screen.size().width()
+        )
         self.px_per_cm = self.width() / width_cm
         window_cm = np.array([self.width(), self.height()]) / self.px_per_cm
         field = np.array(self.args.field_cm, dtype=float)
@@ -561,16 +645,19 @@ class TaskWindow(QtWidgets.QWidget):
         w, h = 2 * self.half * self.px_per_cm
         self.field = QtCore.QRectF((self.width() - w) / 2, (self.height() - h) / 2, w, h)
         note = self.layout_task()
-        geometry = (f"Task field {2 * self.half[0]:.1f} x {2 * self.half[1]:.1f} cm, {w:.0f} x {h:.0f} px "
-                    f"({self.px_per_cm:.1f} px/cm){note}: check its width with a ruler, else set "
-                    "--screen-width-cm" + (" (shrunk to fit the window)" if shrink < 1 else ""))
+        geometry = (
+            f"Task field {2 * self.half[0]:.1f} x {2 * self.half[1]:.1f} cm, {w:.0f} x {h:.0f} px "
+            f"({self.px_per_cm:.1f} px/cm){note}: check its width with a ruler, else set "
+            "--screen-width-cm" + (" (shrunk to fit the window)" if shrink < 1 else "")
+        )
         if geometry != self.geometry_info:
             self.geometry_info = geometry
             print(geometry, flush=True)
 
     def to_px(self, pos):
-        return QtCore.QPointF(self.width() / 2 + pos[0] * self.px_per_cm,
-                              self.height() / 2 - pos[1] * self.px_per_cm)
+        return QtCore.QPointF(
+            self.width() / 2 + pos[0] * self.px_per_cm, self.height() / 2 - pos[1] * self.px_per_cm
+        )
 
     def draw_cursor(self, qp, pos):
         qp.setPen(QtCore.Qt.PenStyle.NoPen)
@@ -590,20 +677,24 @@ class TaskWindow(QtWidgets.QWidget):
             font.setPointSize(FONT_INFO)
             qp.setFont(font)
             qp.setPen(QtGui.QColor(FLAT_COLOR))
-            qp.drawText(self.rect().adjusted(40, 0, -40, -30),
-                        QtCore.Qt.AlignmentFlag.AlignHCenter | QtCore.Qt.AlignmentFlag.AlignBottom
-                        | QtCore.Qt.TextFlag.TextWordWrap, self.channel_info)
+            qp.drawText(
+                self.rect().adjusted(40, 0, -40, -30),
+                QtCore.Qt.AlignmentFlag.AlignHCenter
+                | QtCore.Qt.AlignmentFlag.AlignBottom
+                | QtCore.Qt.TextFlag.TextWordWrap,
+                self.channel_info,
+            )
 
     def tick(self):
         if not hasattr(self, "half"):
             return  # not laid out yet
         now = time.monotonic()
-        t, t_device, data = self.stream.read(0)
+        t_host, t_device, data = self.stream.read(0)
         self.envelope.add(data)
         if self.state != "running":
             self.idle(now)
             return
-        self.raw.append(t, t_device, data)
+        self.raw.append(t_host, t_device, data)
         if now - self.last_flush > 0.2:
             self.raw.flush()
             self.last_flush = now
@@ -621,9 +712,17 @@ class TaskWindow(QtWidgets.QWidget):
         """Stream the EMG to ``sourcedata/`` as ``ent``, and run the frames from now."""
         args = self.args
         self.raw = bids.RawRecording(
-            args.bids_root, ent, self.wb.config, self.stream.channel_labels, firmware=self.wb.firmware,
-            export={"powerline_freq": args.powerline, "task_description": task_description,
-                    "file_format": args.format})
+            args.bids_root,
+            ent,
+            self.wb.config,
+            self.stream.channel_labels,
+            firmware=self.wb.firmware,
+            export={
+                "powerline_freq": args.powerline,
+                "task_description": task_description,
+                "file_format": args.format,
+            },
+        )
         self.frames = []
         self.envelope.frame()  # drop what came in before
         self.t_start = self.next_frame = self.last_frame = self.last_flush = time.monotonic()
@@ -652,8 +751,12 @@ class TaskWindow(QtWidgets.QWidget):
     def beh_sidecar(self):
         """What every beh/ sidecar of the task holds: the geometry and the decoder's channels."""
         labels = self.stream.channel_labels
-        return {"FieldWidthCm": float(2 * self.half[0]), "FieldHeightCm": float(2 * self.half[1]),
-                "ScreenWidthCm": float(self.width() / self.px_per_cm),
-                "ScreenHeightCm": float(self.height() / self.px_per_cm),
-                "CursorRadiusCm": self.args.cursor_radius_cm, "FrameRate": FRAME_RATE,
-                "DecoderChannels": [labels[c] for c in self.channels]}
+        return {
+            "FieldWidthCm": float(2 * self.half[0]),
+            "FieldHeightCm": float(2 * self.half[1]),
+            "ScreenWidthCm": float(self.width() / self.px_per_cm),
+            "ScreenHeightCm": float(self.height() / self.px_per_cm),
+            "CursorRadiusCm": self.args.cursor_radius_cm,
+            "FrameRate": FRAME_RATE,
+            "DecoderChannels": [labels[c] for c in self.channels],
+        }

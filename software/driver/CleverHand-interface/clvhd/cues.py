@@ -30,20 +30,33 @@ from .hand import FINGERS, HAND_LANDMARKS, TIPS
 
 # a gesture: its moving fingers and their motion (pinch: their tips meeting the thumb's,
 # from an open hand; extend: the fingers straightening from a closed hand; rest: none)
-_PINCHES = {"index": ("Thumb-index", ["index"]), "middle": ("Thumb-middle", ["middle"]),
-            "ring": ("Thumb-ring", ["ring"]), "pinky": ("Thumb-pinky", ["pinky"]),
-            "index_middle": ("Thumb-index-middle", ["index", "middle"]),
-            "all": ("All-finger", ["index", "middle", "ring", "pinky"])}
-_EXTENSIONS = {"thumb": ("Thumb", ["thumb"]), "index": ("Index", ["index"]),
-               "middle": ("Middle", ["middle"]), "ring": ("Ring", ["ring"]),
-               "pinky": ("Pinky", ["pinky"]), "thumb_index": ("Thumb-index", ["thumb", "index"]),
-               "thumb_index_middle": ("Thumb-index-middle", ["thumb", "index", "middle"]),
-               "all": ("All-finger", list(FINGERS))}
+_PINCHES = {
+    "index": ("Thumb-index", ["index"]),
+    "middle": ("Thumb-middle", ["middle"]),
+    "ring": ("Thumb-ring", ["ring"]),
+    "pinky": ("Thumb-pinky", ["pinky"]),
+    "index_middle": ("Thumb-index-middle", ["index", "middle"]),
+    "all": ("All-finger", ["index", "middle", "ring", "pinky"]),
+}
+_EXTENSIONS = {
+    "thumb": ("Thumb", ["thumb"]),
+    "index": ("Index", ["index"]),
+    "middle": ("Middle", ["middle"]),
+    "ring": ("Ring", ["ring"]),
+    "pinky": ("Pinky", ["pinky"]),
+    "thumb_index": ("Thumb-index", ["thumb", "index"]),
+    "thumb_index_middle": ("Thumb-index-middle", ["thumb", "index", "middle"]),
+    "all": ("All-finger", list(FINGERS)),
+}
 GESTURES = {
-    **{f"pinch_{k}": {"name": f"{name} pinch", "fingers": ["thumb", *fingers], "motion": "pinch"}
-       for k, (name, fingers) in _PINCHES.items()},
-    **{f"extend_{k}": {"name": f"{name} extension", "fingers": fingers, "motion": "extend"}
-       for k, (name, fingers) in _EXTENSIONS.items()},
+    **{
+        f"pinch_{k}": {"name": f"{name} pinch", "fingers": ["thumb", *fingers], "motion": "pinch"}
+        for k, (name, fingers) in _PINCHES.items()
+    },
+    **{
+        f"extend_{k}": {"name": f"{name} extension", "fingers": fingers, "motion": "extend"}
+        for k, (name, fingers) in _EXTENSIONS.items()
+    },
     "rest": {"name": "Rest", "fingers": [], "motion": "rest"},
 }
 
@@ -55,6 +68,7 @@ class Protocol:
     ``prepare`` (the card in grey, counting down the seconds), ``go`` (lit: do it once),
     ``rest`` (relaxed hand);
     a break, ended by the participant, every ``break_every`` blocks."""
+
     name: str = "finger gestures"
     task: str = "gestures"
     gestures: list = field(default_factory=lambda: list(GESTURES))
@@ -93,15 +107,26 @@ class Protocol:
 
 HAND_SVG = Path(__file__).with_name("assets") / "hand.svg"  # an open right hand, palm side
 # in its 512 x 512 view box: each fingertip, and the direction its finger points
-_SVG_TIPS = {"thumb": (42, 238), "index": (192, 24), "middle": (287, 17), "ring": (380, 50),
-         "pinky": (452, 100)}
-_SVG_DIRECTIONS = {"thumb": (-1.0, -0.17), "index": (-0.06, -1.0), "middle": (-0.06, -1.0),
-           "ring": (-0.08, -1.0), "pinky": (0.09, -1.0)}
+_SVG_TIPS = {
+    "thumb": (42, 238),
+    "index": (192, 24),
+    "middle": (287, 17),
+    "ring": (380, 50),
+    "pinky": (452, 100),
+}
+_SVG_DIRECTIONS = {
+    "thumb": (-1.0, -0.17),
+    "index": (-0.06, -1.0),
+    "middle": (-0.06, -1.0),
+    "ring": (-0.08, -1.0),
+    "pinky": (0.09, -1.0),
+}
 _svg: dict = {}  # renderers by colour
 
 
 def _hand(color):
     from pyqtgraph.Qt import QtCore, QtSvg
+
     if color not in _svg:
         data = HAND_SVG.read_bytes().replace(b'fill="#000000"', f'fill="{color}"'.encode())
         _svg[color] = QtSvg.QSvgRenderer(QtCore.QByteArray(data))
@@ -114,10 +139,14 @@ def draw_card(qp, rect, spec, lit, accent="#ffffff", dim="#b7b7b7", marks="#ffff
     their motion (pinch: a dashed line from the thumb to each finger, arrows closing it;
     extend: an arrow along each finger)."""
     from pyqtgraph.Qt import QtCore, QtGui
+
     s = 0.74 * min(rect.width(), rect.height())
     box = QtCore.QRectF(rect.center().x() - s / 2, rect.center().y() - 0.44 * s, s, s)
     _hand(accent if lit else dim).render(qp, box)
-    P = lambda p: QtCore.QPointF(box.left() + p[0] / 512 * s, box.top() + p[1] / 512 * s)
+
+    def P(p):  # a point of the 512 x 512 hand drawing, in the box
+        return QtCore.QPointF(box.left() + p[0] / 512 * s, box.top() + p[1] / 512 * s)
+
     fingers = spec.get("fingers", [])
     if spec.get("motion") == "rest" or not fingers:
         return
@@ -158,6 +187,7 @@ def _arrow(qp, a, b, s):
 def _head(qp, tip, angle, s):
     """An arrowhead at ``tip`` pointing at ``angle`` (radians, counter-clockwise from x)."""
     from pyqtgraph.Qt import QtCore
+
     L = 0.035 * s
     for side in (-1, 1):
         a = angle + np.pi - side * 0.45
@@ -165,6 +195,7 @@ def _head(qp, tip, angle, s):
 
 
 # ---------------------------------------------------------------- movements, offline
+
 
 def fingertip_speed(t, hand_world):
     """Speed (m/s) of the fastest fingertip at each camera frame: ``t`` (N,) s, ``hand_world``
@@ -208,7 +239,7 @@ def movement_windows(go, t, speed, window=(-0.2, 2.5), k=4.0, min_s=0.08, gap_s=
             out.append((np.nan, np.nan, "no_movement"))
             continue
         end = runs[first][-1]
-        for r in runs[first + 1:]:
+        for r in runs[first + 1 :]:
             if tw[r[0]] - tw[end] > gap_s:
                 break
             end = r[-1]
@@ -223,49 +254,100 @@ def _num(v):
 def main(argv=None):
     """``clvhd-movements EVENTS.tsv``: each go's movement from the recording's camera (its
     motion/ file), to derivatives/movements/.../<label>_desc-movements_events.tsv."""
-    p = argparse.ArgumentParser(description=(main.__doc__ or "").split("\n")[0])
+    p = argparse.ArgumentParser(description=(main.__doc__ or "").splitlines()[0])
     p.add_argument("events", help="the recording's emg/..._events.tsv")
     p.add_argument("--k", type=float, default=4.0, help="threshold: median + k MADs of the speed")
     a = p.parse_args(argv)
     events_path = Path(a.events).resolve()
-    label = events_path.name[:-len("_events.tsv")]
+    label = events_path.name[: -len("_events.tsv")]
     task_part = next(x for x in label.split("_") if x.startswith("task-"))
-    motion_name = label.replace(task_part, f"{task_part}_tracksys-mediapipe") + "_motion.tsv"
+    motion_name = label.replace(task_part, f"{task_part}_tracksys-{bids.TRACKSYS}") + "_motion.tsv"
     motion_path = events_path.parent.parent / "motion" / motion_name
     if not motion_path.exists():
         raise SystemExit(f"no camera recording for it: {motion_path}")
-    root = next((p for p in events_path.parents if (p / "dataset_description.json").exists()
-                 and p.name != "derivatives"), None)
+    root = next(
+        (
+            p
+            for p in events_path.parents
+            if (p / "dataset_description.json").exists() and p.name != "derivatives"
+        ),
+        None,
+    )
     if root is None:
         raise SystemExit(f"{events_path} is not in a BIDS dataset (no dataset_description.json)")
     events = bids.read_tsv(events_path)
-    channels = [r["name"] for r in bids.read_tsv(motion_path.with_name(
-        motion_name.replace("_motion.tsv", "_channels.tsv")))]
+    channels = [
+        r["name"]
+        for r in bids.read_tsv(
+            motion_path.with_name(motion_name.replace("_motion.tsv", "_channels.tsv"))
+        )
+    ]
     with motion_path.open(encoding="utf-8") as f:
         motion = np.array([[_num(v) for v in row] for row in csv.reader(f, delimiter="\t")])
     col = {n: i for i, n in enumerate(channels)}
     t = motion[:, col["latency"]]
-    world = np.stack([motion[:, [col[f"hand_{p}_{c}_world"] for c in "xyz"]]
-                      for p in HAND_LANDMARKS], axis=1)
+    world = np.stack(
+        [motion[:, [col[f"hand_{p}_{c}_world"] for c in "xyz"]] for p in HAND_LANDMARKS], axis=1
+    )
     gos = [e for e in events if e["trial_type"] == "go"]
-    windows = movement_windows([float(e["onset"]) for e in gos], t, fingertip_speed(t, world), k=a.k)
-    out = (root / "derivatives" / "movements" / events_path.parent.relative_to(root)
-           / f"{label}_desc-movements_events.tsv")
+    windows = movement_windows(
+        [float(e["onset"]) for e in gos], t, fingertip_speed(t, world), k=a.k
+    )
+    out = (
+        root
+        / "derivatives"
+        / "movements"
+        / events_path.parent.relative_to(root)
+        / f"{label}_desc-movements_events.tsv"
+    )
     rows = []
     for e, (on, off, status) in zip(gos, windows, strict=True):
-        rows.append([f"{on:.4f}" if status == "ok" else e["onset"],
-                     f"{off - on:.4f}" if status == "ok" else "n/a", "movement", e.get("gesture", "n/a"),
-                     e.get("block", "n/a"), e.get("trial", "n/a"), e["onset"],
-                     f"{on - float(e['onset']):.4f}" if status == "ok" else "n/a", status])
-    bids.write_tsv(out, ["onset", "duration", "trial_type", "gesture", "block", "trial", "go_onset",
-                         "reaction_time", "status"], rows)
-    bids.write_json(out.with_suffix(".json"), {
-        "onset": {"Description": "Movement onset (fingertips' speed above threshold), from the "
-                                 "first EMG sample; the go's onset when none was found",
-                  "Units": "s"},
-        "reaction_time": {"Description": "Movement onset after the go", "Units": "s"},
-        "status": {"Levels": {"ok": "movement found", "no_movement": "none above threshold",
-                              "no_hand": "no hand in the camera"}}})
+        rows.append(
+            [
+                f"{on:.4f}" if status == "ok" else e["onset"],
+                f"{off - on:.4f}" if status == "ok" else "n/a",
+                "movement",
+                e.get("gesture", "n/a"),
+                e.get("block", "n/a"),
+                e.get("trial", "n/a"),
+                e["onset"],
+                f"{on - float(e['onset']):.4f}" if status == "ok" else "n/a",
+                status,
+            ]
+        )
+    bids.write_tsv(
+        out,
+        [
+            "onset",
+            "duration",
+            "trial_type",
+            "gesture",
+            "block",
+            "trial",
+            "go_onset",
+            "reaction_time",
+            "status",
+        ],
+        rows,
+    )
+    bids.write_json(
+        out.with_suffix(".json"),
+        {
+            "onset": {
+                "Description": "Movement onset (fingertips' speed above threshold), from the "
+                "first EMG sample; the go's onset when none was found",
+                "Units": "s",
+            },
+            "reaction_time": {"Description": "Movement onset after the go", "Units": "s"},
+            "status": {
+                "Levels": {
+                    "ok": "movement found",
+                    "no_movement": "none above threshold",
+                    "no_hand": "no hand in the camera",
+                }
+            },
+        },
+    )
     ok = sum(w[2] == "ok" for w in windows)
     print(f"{ok} of {len(windows)} trials with a movement -> {out}")
 

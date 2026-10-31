@@ -8,7 +8,7 @@ from clvhd.coadapt import FRAME_RATE
 
 def simulated(rng, scale, n_channels=12, noise=0.002):
     """Envelopes of a cued calibration: each channel tuned to a direction, plus ``noise``, in mV
-    times ``scale``; and the labels, cues and mask."""
+    times ``scale``; and the labels, cues and the frames to fit on (``in_fit``)."""
     pos = centerout.targets(5.0)
     cal = centerout.Calibration(centerout.block_order(rng, 3), pos)
     t = np.arange(0, cal.duration, 1 / FRAME_RATE)

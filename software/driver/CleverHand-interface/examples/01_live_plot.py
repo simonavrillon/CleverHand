@@ -8,6 +8,7 @@ saves the EMG to a BIDS dataset (see clvhd/bids.py).
 
 Subject, session and task can also be typed in the window; each recording takes the next run.
 """
+
 import argparse
 
 from pyqtgraph.Qt import QtCore, QtWidgets

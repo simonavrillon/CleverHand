@@ -10,7 +10,7 @@ electrodes, the DRY_ELEC_6CH_THIN), worn around the forearm.
 | `firmware/uctrl_teensy/` | the Teensy controller firmware (serial protocol v4.1) |
 | `examples/` | live-plot, hand-tracking and cursor-control windows |
 | `tests/` | driver tests against a simulated Teensy on a pseudo-terminal |
-| `docs/` | `serial_protocol.md` (host ↔ Teensy protocol) and `ads1293.pdf` (the ADS1293 datasheet) |
+| `docs/` | `serial_protocol.md` (host ↔ Teensy protocol), `experiments.md` (03/04 design notes), `ads1293.pdf` (the ADS1293 datasheet) |
 
 ## Contents
 
@@ -139,7 +139,8 @@ The windows share one look, from `clvhd/ui.py`:
   with a countdown (prepare, 3 s: 3, 2, 1), lit (go: do it once, 1.5 s), then a relaxed hand (rest,
   2 s). Space starts it and records the EMG, the camera and the cue events in one run
   (`_events.tsv`: cue, go, rest and break, with the gesture, its fingers and motion, block and
-  trial, stamped when the card is drawn); Escape stops it, keeping what was recorded. The protocol
+  trial, stamped when the card is drawn); Space also ends the breaks between blocks, and Escape
+  stops it, keeping what was recorded. The protocol
   file sets the gestures (or new ones), repetitions and timings. `clvhd-movements <the run's
   _events.tsv>` then finds each go's real movement from the camera's fingertips (onset, offset,
   reaction time, or no movement / no hand), in `derivatives/movements/`: the windows to train
@@ -160,9 +161,9 @@ The windows share one look, from `clvhd/ui.py`:
   outcome, time to target, acquisition time and path efficiency; `beh/`), with the decoder and the
   envelopes in `derivatives/centerout/`; `--decoder` reuses a saved decoder and skips the
   calibration. A contact check at the start leaves flat and poor-contact channels out of the
-  decoder. Same task field and `--field-cm` as 04, in the examples' dark palette: the targets take
-  the module colours of the live plot in turn (but green, which marks an acquired target), the
-  cursor is white.
+  decoder. Escape quits; the phase in progress is not saved. Same task field and `--field-cm` as
+  04, in the examples' dark palette: the targets take the module colours of the live plot in turn
+  (but green, which marks an acquired target), the cursor is white.
 - `04_cursor_coadapt.py`: co-adaptive myoelectric cursor tracking, after Madduri et al. (Nat. Mach.
   Intell. 2026): a linear decoder of the EMG, refit every 20 s on the intended velocity with an
   effort penalty λ and blended with the previous one by SmoothBatch; 6 five-minute trials, the
@@ -172,7 +173,7 @@ The windows share one look, from `clvhd/ui.py`:
   the calibration) and the decoder's gain and direction against the calibration's; they are saved
   with each trial, and an interrupted trial's data go to `derivatives/coadapt/` as
   `_desc-interrupted…npz`. Each trial goes to the BIDS dataset (`--bids-root`, default `data/`):
-  `emg/` with `_events.tsv`, `beh/`) and `derivatives/coadapt/` (envelopes and every decoder); a
+  `emg/` with `_events.tsv`, `beh/` and `derivatives/coadapt/` (envelopes and every decoder); a
   rerun resumes at the first unsaved trial. Not in the paper: the decoder is 03's
   (`clvhd.decoder.WienerFilter`, from a `03_cursor_centerout.py` calibration at the start of the
   same session, `--decoder <its _desc-decoder.npz>`, required), without its output stage and with
@@ -234,7 +235,7 @@ requires it.
 ## Tests
 
 One file per `clvhd` module (`test_<module>.py`, as in MUedit2); shared fixtures live in
-`tests/conftest.py` and helpers in underscore-prefixed modules (`_teensy_sim.py`, `_helpers.py`,
+`tests/conftest.py` and helpers in underscore-prefixed modules (`_teensy_sim.py`,
 `_synthetic.py`). `tests/_teensy_sim.py` simulates the Teensy and 13 modules on a pseudo-terminal
 (macOS/Linux): different clock rates, up to 350 us of timestamp jitter, the `micros()` wraparound,
 the controller's 1 s boot delay, and optional dropped, duplicated and corrupted frames.
@@ -249,6 +250,9 @@ The package, the examples and the tests are linted and type-checked like in MUed
 (config in `pyproject.toml`; ruff and mypy are in the `dev` dependency group):
 
 ```bash
-uv run ruff check .   # lint (import order, pyupgrade, bug finders, ...)
-uv run mypy           # types over clvhd/, examples/ and tests/
+uv run ruff check . && uv run ruff format .   # lint and format (import order, pyupgrade, bug finders, ...)
+uv run mypy                                    # types over clvhd/, examples/ and tests/
 ```
+
+Working on the code? Read [AGENTS.md](AGENTS.md) first (conventions, rules, and what to run
+before finishing). Experiment design notes (03, 04): [docs/experiments.md](docs/experiments.md).

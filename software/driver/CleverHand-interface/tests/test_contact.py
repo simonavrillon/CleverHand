@@ -10,9 +10,13 @@ def test_contact_check_flags_flat_on_skin_and_lifted_channels():
     # pairs on skin tens of mV and tens of uV, a lifted electrode -344 mV
     rng = np.random.default_rng(0)
     n = 2083
-    data = np.column_stack([rng.normal(0, 3e-6, n),
-                            -0.030 + rng.normal(0, 30e-6, n),
-                            -0.344 + rng.normal(0, 130e-6, n)])
+    data = np.column_stack(
+        [
+            rng.normal(0, 3e-6, n),
+            -0.030 + rng.normal(0, 30e-6, n),
+            -0.344 + rng.normal(0, 130e-6, n),
+        ]
+    )
     data[[5, 50], 1] = np.nan  # missing samples are ignored
     assert clvhd.check_contact(data) == ["flat", "", "poor contact"]
 

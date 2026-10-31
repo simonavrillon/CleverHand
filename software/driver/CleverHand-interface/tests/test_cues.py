@@ -6,6 +6,8 @@ import os
 import numpy as np
 import pytest
 
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 from clvhd import cues
 from clvhd.hand import FINGERS
 
@@ -19,10 +21,23 @@ def test_protocol_runs_every_gesture_once_per_block(tmp_path):
     assert p.duration() == pytest.approx(len(order) * 6.5)
     # a file, with a gesture of one's own
     path = tmp_path / "p.json"
-    path.write_text(json.dumps({"name": "two", "gestures": [
-        "pinch_index", {"id": "flex_index", "name": "Index flexion", "fingers": ["index"],
-                        "motion": "flex"}],
-        "repetitions": 2}))
+    path.write_text(
+        json.dumps(
+            {
+                "name": "two",
+                "gestures": [
+                    "pinch_index",
+                    {
+                        "id": "flex_index",
+                        "name": "Index flexion",
+                        "fingers": ["index"],
+                        "motion": "flex",
+                    },
+                ],
+                "repetitions": 2,
+            }
+        )
+    )
     q = cues.Protocol.load(path)
     assert list(q.specs()) == ["pinch_index", "flex_index"]
     assert q.specs()["flex_index"]["fingers"] == ["index"]
@@ -43,10 +58,10 @@ def test_every_gesture_has_a_valid_spec():
 
 def test_cards_draw():
     pytest.importorskip("pyqtgraph")
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from pyqtgraph.Qt import QtCore, QtGui
 
     from clvhd import ui
+
     app = ui.application()  # kept: drawing text needs it alive
     img = QtGui.QImage(200, 200, QtGui.QImage.Format.Format_RGB32)
     for spec in cues.GESTURES.values():

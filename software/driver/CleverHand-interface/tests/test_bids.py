@@ -6,9 +6,8 @@ import numpy as np
 import pytest
 
 from clvhd import ads1293, bids, check_contact
-from clvhd.bids import _filled_blocks, _scan
-from clvhd.hand import HandFrame, stack
-from tests._helpers import read_tsv
+from clvhd.bids import _filled_blocks, _scan, read_tsv
+from clvhd.hand import HandFrame, finger_flexion, pinch_aperture, stack
 
 
 class TestWriteEmg:
@@ -16,19 +15,30 @@ class TestWriteEmg:
         pyedflib = pytest.importorskip("pyedflib")
         cfg = ads1293.Config()
         fs = cfg.odr()
-        n_mod, n = 2, 7000  # not a whole number of 3 s data records
-        labels = [f"m{m}_ch{c + 1}" for m in range(n_mod) for c in range(3)]
+        nb_modules, n = 2, 7000  # not a whole number of 3 s data records
+        labels = [f"m{m}_ch{c + 1}" for m in range(nb_modules) for c in range(3)]
         t = 100 + np.arange(n) / fs
         rng = np.random.default_rng(5)
-        data = rng.normal(size=(n, 3 * n_mod)) * 30e-6 + np.linspace(-0.2, 0.05, 3 * n_mod)
+        data = rng.normal(size=(n, 3 * nb_modules)) * 30e-6 + np.linspace(
+            -0.2, 0.05, 3 * nb_modules
+        )
         data[10:13, 1] = np.nan
         data[:, 5] = rng.normal(size=n) * 1e-6  # flat
         ent = bids.Entities("01", "rest", session="01", run="02")
         root = tmp_path / "ds"
         bids.write_dataset(root)
         bids.write_participant(root, "01", age=30, handedness="right")
-        out = bids.write_emg(root, ent, t, data, cfg, labels, powerline_freq=50,
-                             muscles={0: "ECR"}, contact=check_contact(data[:2000]))
+        out = bids.write_emg(
+            root,
+            ent,
+            t,
+            data,
+            cfg,
+            labels,
+            powerline_freq=50,
+            muscles={0: "ECR"},
+            contact=check_contact(data[:2000]),
+        )
 
         with pyedflib.EdfReader(str(out["emg"])) as r:
             assert r.getSignalLabels() == labels
@@ -38,7 +48,9 @@ class TestWriteEmg:
         steps = np.array([float(r["resolution"]) for r in read_tsv(out["channels"])]) * 1e-6
         assert out["emg"].suffix == ".edf"
         assert (np.abs(x - data) <= steps / 2 + 1e-12)[ok].all()  # half an EDF step at most
-        assert np.allclose(x[10:13, 1], np.interp(t[10:13], t[ok[:, 1]], data[ok[:, 1], 1]), atol=2e-7)
+        assert np.allclose(
+            x[10:13, 1], np.interp(t[10:13], t[ok[:, 1]], data[ok[:, 1], 1]), atol=2e-7
+        )
 
         rows = read_tsv(out["channels"])
         assert [r["name"] for r in rows] == labels
@@ -56,32 +68,39 @@ class TestWriteEmg:
         assert float(electrodes[1]["x"]) == pytest.approx(5.08)
 
         # motion: frames before the first EMG sample are left out; latency from it
-        frames = [HandFrame.empty(t[0] - 0.5, 0), HandFrame.empty(t[0] + 0.1, 1),
-                  HandFrame.empty(t[0] + 0.2, 2)]
+        frames = [
+            HandFrame.empty(t[0] - 0.5, 0),
+            HandFrame.empty(t[0] + 0.1, 1),
+            HandFrame.empty(t[0] + 0.2, 2),
+        ]
         frames[1].handedness, frames[1].score = "Right", 0.9
         frames[1].hand_world = rng.normal(size=(21, 3))
         motion = bids.write_motion(root, ent, stack(frames), t[0], 30)
         lines = motion["motion"].read_text().splitlines()
         channels = read_tsv(motion["channels"])
-        assert len(lines) == 2 and all(len(l.split("\t")) == len(channels) for l in lines)
+        assert len(lines) == 2 and all(len(x.split("\t")) == len(channels) for x in lines)
         first = dict(zip([c["name"] for c in channels], lines[0].split("\t"), strict=True))
-        from clvhd.hand import finger_flexion, pinch_aperture
         assert first["latency"] == "0.100000"
         assert first["hand_right"] == "1"
         assert float(first["index_flexion"]) == pytest.approx(
-            finger_flexion(frames[1].hand_world)[1], abs=1e-3)
+            finger_flexion(frames[1].hand_world)[1], abs=1e-3
+        )
         assert float(first["pinch_aperture"]) == pytest.approx(
-            pinch_aperture(frames[1].hand_world), abs=1e-3)
+            pinch_aperture(frames[1].hand_world), abs=1e-3
+        )
         assert lines[1].split("\t")[1] == "n/a"
         assert "tracksys-mediapipe" in motion["motion"].name
         assert motion["motion"].name.index("task-") < motion["motion"].name.index("tracksys-")
 
         bids.write_scans(root, ent, [out["emg"], motion["motion"]], bids.acq_time(t[0]))
         scans = read_tsv(root / "sub-01" / "ses-01" / "sub-01_ses-01_scans.tsv")
-        assert {s["filename"] for s in scans} == {f"emg/{out['emg'].name}",
-                                                  f"motion/{motion['motion'].name}"}
+        assert {s["filename"] for s in scans} == {
+            f"emg/{out['emg'].name}",
+            f"motion/{motion['motion'].name}",
+        }
         assert read_tsv(root / "participants.tsv") == [
-            {"participant_id": "sub-01", "age": "30", "sex": "n/a", "handedness": "right"}]
+            {"participant_id": "sub-01", "age": "30", "sex": "n/a", "handedness": "right"}
+        ]
         assert json.loads((root / "dataset_description.json").read_text())["DatasetType"] == "raw"
 
     def test_edf_reports_coarse_channels_and_the_bdf_option(self, tmp_path):
@@ -105,10 +124,10 @@ class TestFilledBlocks:
         rng = np.random.default_rng(7)
         t = np.arange(1000) / 100.0
         data = rng.normal(size=(1000, 4))
-        data[5:300, 0] = np.nan    # a gap across several blocks
-        data[:40, 1] = np.nan      # leading
-        data[900:, 2] = np.nan     # trailing
-        data[:, 3] = np.nan        # no valid sample
+        data[5:300, 0] = np.nan  # a gap across several blocks
+        data[:40, 1] = np.nan  # leading
+        data[900:, 2] = np.nan  # trailing
+        data[:, 3] = np.nan  # no valid sample
         missing, lo, hi, last = _scan(data, 64)
         got = np.concatenate(list(_filled_blocks(t, data, 64, last)))
         want = data.copy()
@@ -125,6 +144,7 @@ class TestRawRecording:
     def test_export_and_next_run(self, tmp_path):
         pytest.importorskip("pyedflib")
         import pyedflib
+
         cfg = ads1293.Config()
         root = tmp_path / "ds"
         ent = bids.Entities("01", "rest", acquisition="dry")
@@ -139,12 +159,18 @@ class TestRawRecording:
         frames = [HandFrame.empty(50 + k / 30, k) for k in range(500)]
         for f in frames[::2]:
             f.handedness, f.score = "Left", 0.8
-        raw = bids.RawRecording(root, bids.Entities("01", "rest", acquisition="dry", run="01"), cfg,
-                                labels, hand=True, camera_fps=30,
-                                export={"participant": {"age": 40}, "muscles": {"0": "ECR"}})
+        raw = bids.RawRecording(
+            root,
+            bids.Entities("01", "rest", acquisition="dry", run="01"),
+            cfg,
+            labels,
+            hand=True,
+            camera_fps=30,
+            export={"participant": {"age": 40}, "muscles": {"0": "ECR"}},
+        )
         for a in range(0, n, 700):  # as the GUI appends: chunk after chunk
-            raw.append(t[a:a + 700], t[a:a + 700] - 50, data[a:a + 700])
-            raw.append_frames(stack(frames[a // 80:(a + 700) // 80]))
+            raw.append(t[a : a + 700], t[a : a + 700] - 50, data[a : a + 700])
+            raw.append_frames(stack(frames[a // 80 : (a + 700) // 80]))
             raw.flush()
         raw.close(stats=[{"samples": n}])
         out = bids.export_recording(raw)
@@ -167,8 +193,12 @@ class TestRawRecording:
         """A recording never closed (and a half-written last record) still exports."""
         pytest.importorskip("pyedflib")
         cfg = ads1293.Config()
-        raw = bids.RawRecording(tmp_path / "ds", bids.Entities("02", "rest", run="01"), cfg,
-                                ["m0_ch1", "m0_ch2", "m0_ch3"])
+        raw = bids.RawRecording(
+            tmp_path / "ds",
+            bids.Entities("02", "rest", run="01"),
+            cfg,
+            ["m0_ch1", "m0_ch2", "m0_ch3"],
+        )
         t = 10 + np.arange(5000) / cfg.odr()
         raw.append(t, t, np.random.default_rng(8).normal(size=(5000, 3)) * 1e-5)
         raw.flush()
@@ -185,9 +215,14 @@ class TestRawRecording:
         """After a reboot time.monotonic() restarts: the export uses the time taken while recording."""
         pytest.importorskip("pyedflib")
         import pyedflib
+
         cfg = ads1293.Config()
-        raw = bids.RawRecording(tmp_path / "ds", bids.Entities("04", "rest", run="01"), cfg,
-                                ["m0_ch1", "m0_ch2", "m0_ch3"])
+        raw = bids.RawRecording(
+            tmp_path / "ds",
+            bids.Entities("04", "rest", run="01"),
+            cfg,
+            ["m0_ch1", "m0_ch2", "m0_ch3"],
+        )
         t = 10 + np.arange(3000) / cfg.odr()
         raw.append(t, t, np.random.default_rng(9).normal(size=(3000, 3)) * 1e-5)
         raw.close()
@@ -204,18 +239,25 @@ class TestRawRecording:
     def test_sourcedata_is_kept_when_the_export_does_not_read_back(self, tmp_path, monkeypatch):
         pytest.importorskip("pyedflib")
         cfg = ads1293.Config()
-        raw = bids.RawRecording(tmp_path / "ds", bids.Entities("03", "rest", session="1", run="01"),
-                                cfg, ["m0_ch1", "m0_ch2", "m0_ch3"])
+        raw = bids.RawRecording(
+            tmp_path / "ds",
+            bids.Entities("03", "rest", session="1", run="01"),
+            cfg,
+            ["m0_ch1", "m0_ch2", "m0_ch3"],
+        )
         t = np.arange(3000) / cfg.odr()
         raw.append(t, t, np.zeros((3000, 3)))
         raw.close()
 
-        def broken(*args):
+        def broken(*_):
             raise OSError("does not read back complete")
+
         monkeypatch.setattr(bids, "_check_export", broken)
         with pytest.raises(OSError):
             bids.export_recording(raw)
-        assert raw.header_path.exists() and raw.header_path.with_name(raw.header["emg_file"]).exists()
+        assert (
+            raw.header_path.exists() and raw.header_path.with_name(raw.header["emg_file"]).exists()
+        )
         monkeypatch.undo()
         bids.export_recording(raw)  # a retry succeeds and cleans up, empty folders included
         assert not (tmp_path / "ds" / "sourcedata").exists()
@@ -226,9 +268,14 @@ class TestRawRecording:
         fs = cfg.odr()
         root = tmp_path / "ds"
         ent = bids.Entities("01", "gestures", run="01")
-        raw = bids.RawRecording(root, ent, cfg, ["m0_ch1", "m0_ch2", "m0_ch3"],
-                                events=["gesture", "block"],
-                                export={"event_descriptions": {"gesture": {"Description": "cued"}}})
+        raw = bids.RawRecording(
+            root,
+            ent,
+            cfg,
+            ["m0_ch1", "m0_ch2", "m0_ch3"],
+            events=["gesture", "block"],
+            export={"event_descriptions": {"gesture": {"Description": "cued"}}},
+        )
         n = 3000
         t = 100 + np.arange(n) / fs
         raw.append(t, t - 100, np.random.default_rng(2).normal(size=(n, 3)) * 30e-6)
@@ -241,8 +288,14 @@ class TestRawRecording:
         out = bids.export_recording(raw)
         rows = read_tsv(out["events"])
         assert [r["trial_type"] for r in rows] == ["cue", "go", "break"]
-        assert float(rows[0]["onset"]) == pytest.approx(0.5) and rows[0]["sample"] == str(round(0.5 * fs))
-        assert rows[1]["block"] == "n/a" and rows[2]["duration"] == "n/a" and rows[0]["duration"] == "1"
+        assert float(rows[0]["onset"]) == pytest.approx(0.5) and rows[0]["sample"] == str(
+            round(0.5 * fs)
+        )
+        assert (
+            rows[1]["block"] == "n/a"
+            and rows[2]["duration"] == "n/a"
+            and rows[0]["duration"] == "1"
+        )
         sidecar = json.loads(out["events"].with_suffix(".json").read_text())
         assert sidecar["gesture"]["Description"] == "cued" and sidecar["onset"]["Units"] == "s"
         assert not (root / "sourcedata").exists()  # the events file deleted with the rest

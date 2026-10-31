@@ -19,7 +19,7 @@
 class ClvHd
 {
     public:
-    // Initialise the SPI bus and the selction pins
+    // Initialise the SPI bus and the selection pins
     ClvHd() {};
     ~ClvHd() {};
 
@@ -113,7 +113,7 @@ class ClvHd
     }
 
     /**
-     * @brief Select the module by activating the coreponding address pins.
+     * @brief Select the module by activating the corresponding address pins.
      *
      * @param id Address of the module to select (1 to 15)
      */
@@ -138,12 +138,12 @@ class ClvHd
     }
 
     /**
-     * @brief Read n uint8_ts starting from the reg address of the module coreponding to id.
+     * @brief Read n uint8_t starting from the reg address of the module corresponding to id.
      *
-     * @param n_cmd Number of uint8_ts to read from the module
-     * @param cmd Array of uint8_ts to send to the module
-     * @param val Array of uint8_ts to store the read values
-     * @param n Number of uint8_ts to read from the module
+     * @param n_cmd Number of uint8_t to read from the module
+     * @param cmd Array of uint8_t to send to the module
+     * @param val Array of uint8_t to store the read values
+     * @param n Number of uint8_t to read from the module
      * @param id Address of the module to read from (1 to 15)
      */
     void
@@ -158,12 +158,12 @@ class ClvHd
     }
 
     /**
-     * @brief Write n uint8_t to the reg ad the module coreponding to id.
+     * @brief Write n uint8_t to the reg of the module corresponding to id.
      *
-     * @param n_cmd Number of uint8_ts to write to the module
-     * @param cmd Array of uint8_ts to send to the module
-     * @param n Number of uint8_ts to write to the module
-     * @param val Array of uint8_ts to write to the module
+     * @param n_cmd Number of uint8_t to write to the module
+     * @param cmd Array of uint8_t to send to the module
+     * @param n Number of uint8_t to write to the module
+     * @param val Array of uint8_t to write to the module
      * @param id Address of the module to write to (1 to 15)
      */
     void

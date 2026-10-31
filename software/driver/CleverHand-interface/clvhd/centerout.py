@@ -58,12 +58,22 @@ class Calibration:
         moving = k < len(self.order) and within >= self.rest
         near = min(within, abs(within - self.rest)) < REACTION_S
         if not moving:
-            return {"cue": k, "target": -1, "guide": np.zeros(2), "velocity": np.zeros(2),
-                    "fit": not near}
+            return {
+                "cue": k,
+                "target": -1,
+                "guide": np.zeros(2),
+                "velocity": np.zeros(2),
+                "fit": not near,
+            }
         target = int(self.order[k])
         goal = self.positions[target]
-        return {"cue": k, "target": target, "guide": goal * min(1.0, (within - self.rest) / self.cue),
-                "velocity": goal / self.cue, "fit": not near}
+        return {
+            "cue": k,
+            "target": target,
+            "guide": goal * min(1.0, (within - self.rest) / self.cue),
+            "velocity": goal / self.cue,
+            "fit": not near,
+        }
 
 
 def reach_metrics(t, cursor, target, radius, hold=HOLD_S):
@@ -78,15 +88,20 @@ def reach_metrics(t, cursor, target, radius, hold=HOLD_S):
     t, cursor = np.asarray(t, dtype=float), np.asarray(cursor, dtype=float)
     inside = np.linalg.norm(cursor - target, axis=1) <= radius
     starts = np.flatnonzero(inside & ~np.r_[False, inside[:-1]])
-    out = {"success": False, "time_to_target": t[starts[0]] if len(starts) else np.nan,
-           "acquisition_time": np.nan, "path_efficiency": np.nan, "entries": len(starts)}
+    out = {
+        "success": False,
+        "time_to_target": t[starts[0]] if len(starts) else np.nan,
+        "acquisition_time": np.nan,
+        "path_efficiency": np.nan,
+        "entries": len(starts),
+    }
     for s in starts:
         after = np.flatnonzero(~inside[s:])
         end = s + after[0] if len(after) else len(t)
         done = np.flatnonzero(t[s:end] - t[s] >= hold - 1e-9)
         if len(done):
             out["success"], out["acquisition_time"] = True, t[s + done[0]]
-            path = np.linalg.norm(np.diff(cursor[:s + 1], axis=0), axis=1).sum()
+            path = np.linalg.norm(np.diff(cursor[: s + 1], axis=0), axis=1).sum()
             straight = max(0.0, np.linalg.norm(target - cursor[0]) - radius)
             out["path_efficiency"] = straight / path if path > 0 else np.nan
             break

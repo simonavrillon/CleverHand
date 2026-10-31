@@ -1,7 +1,7 @@
 """Live EMG of every module (as 01_live_plot.py) next to the camera, its MediaPipe hand
-skeleton, and the finger movements (each finger's flexion, the thumb-index pinch), with a
+skeleton and the finger movements (each finger's flexion, the thumb-index pinch), with a
 record button that saves the EMG and the hand kinematics to a BIDS dataset (emg/ and motion/,
-see clvhd/bids.py); with --protocol, cued gestures for classifier datasets.
+see clvhd/bids.py); with --protocol, cued finger gestures for classifier datasets (clvhd.cues).
 
     python 02_live_emg_hand.py [--port PORT] [--modules 13] [--camera 0] [--window 5]
         [--protocol protocols/finger_gestures.json [--cue-fullscreen] [--seed 1]]
@@ -9,28 +9,10 @@ see clvhd/bids.py); with --protocol, cued gestures for classifier datasets.
         [--muscle 0=FDS] [--age 30 --sex F --handedness right]
 
 Subject, session and task can also be typed in the window; each recording takes the next run.
-
-Each finger's flexion is the sum of its joint angles (near 0 flat, about 250 deg in a fist),
-the pinch the distance between the thumb and index tips (clvhd.hand.finger_flexion,
-pinch_aperture), from MediaPipe's 3D hand landmarks; the skeleton draws each finger in its
-trace's colour.
-
---protocol (a JSON file, clvhd.cues.Protocol) opens a second window, for the participant,
-with the cards of its gestures (clvhd.cues: thumb pinches with each finger, with index and
-middle, with all; extensions of each finger, thumb + index, thumb + index + middle, all;
-rest), each performed once from the starting position shown on the card (open hand for a
-pinch, closed hand for an extension): the card in grey with a countdown
-(prepare), lit (go: do it once), then the relaxed hand (rest). Space starts it, recording the EMG, the camera and the cue
-events in one run (the task: the protocol's unless typed); Space also ends the breaks between
-blocks; Escape stops it and saves what was recorded. The events (_events.tsv: cue, go, rest
-and break, with the gesture, its fingers and motion, block and trial) are stamped when their
-card is drawn, on the samples' clock. After the recording, clvhd-movements finds each go's
-real movement from the camera (derivatives/movements/), the windows to train on.
-
-Three threads feed the window: the driver's serial reader, the camera reader
-and the MediaPipe thread (clvhd.hand.HandTracker). Both streams are stamped
-with time.monotonic(), so the EMG and the finger movements share the time axis.
+The camera and the EMG share one clock (time.monotonic(), clvhd.hand.HandTracker), so the EMG
+and the finger movements share the time axis. Full description: the driver README, "Examples".
 """
+
 import argparse
 import itertools
 import time
@@ -54,7 +36,8 @@ p.add_argument("--duration", type=float, default=0, help="close after this many 
 ui.add_record_arguments(p)
 args = p.parse_args()
 
-FINGER_COLORS = dict(zip(FINGERS, ui.MODULE_COLORS, strict=False))  # the skeleton's fingers as their traces
+# the skeleton's fingers as their traces
+FINGER_COLORS = dict(zip(FINGERS, ui.MODULE_COLORS, strict=False))
 PINCH_COLOR = ui.TEXT_COLOR
 FLEXION_RANGE = (0, 270)  # deg: straight to a fist
 PINCH_RANGE = (0, 15)  # cm
@@ -69,22 +52,36 @@ class Window(QtWidgets.QWidget):
         self.setWindowTitle("CleverHand EMG + hand")
         ui.style(self)
         self.emg = ui.EmgPanel(wb, stream, args.window, args.powerline)
-        self.recorder = ui.RecordBar(self.emg, wb, args, camera_fps=tracker.nominal_fps,
-                                     events=events, event_descriptions=event_descriptions)
+        self.recorder = ui.RecordBar(
+            self.emg,
+            wb,
+            args,
+            camera_fps=tracker.nominal_fps,
+            events=events,
+            event_descriptions=event_descriptions,
+        )
         self.hand_t = np.full(int(args.window * 120), np.nan)  # room for 120 fps
         self.fingers = np.full((len(self.hand_t), len(FINGERS) + 1), np.nan)  # flexions, pinch
         self.with_hand = 0
 
         self.camera_status = QtWidgets.QLabel()
         graphs = pg.GraphicsLayoutWidget()
-        self.view = graphs.addViewBox(row=0, col=0, lockAspect=True, invertY=True, enableMouse=False)
+        self.view = graphs.addViewBox(
+            row=0, col=0, lockAspect=True, invertY=True, enableMouse=False
+        )
         self.image = pg.ImageItem()
         self.view.addItem(self.image)
         # the skeleton: the palm, then each finger in its trace's colour
-        self.bones = [(PALM, pg.PlotDataItem(pen=pg.mkPen(ui.FLAT_COLOR, width=3), connect="pairs"))]
-        self.bones += [(list(itertools.pairwise(chain)),
-                        pg.PlotDataItem(pen=pg.mkPen(FINGER_COLORS[name], width=3), connect="pairs"))
-                       for name, chain in FINGERS.items()]
+        self.bones = [
+            (PALM, pg.PlotDataItem(pen=pg.mkPen(ui.FLAT_COLOR, width=3), connect="pairs"))
+        ]
+        self.bones += [
+            (
+                list(itertools.pairwise(chain)),
+                pg.PlotDataItem(pen=pg.mkPen(FINGER_COLORS[name], width=3), connect="pairs"),
+            )
+            for name, chain in FINGERS.items()
+        ]
         for _, item in self.bones:
             self.view.addItem(item)
 
@@ -95,27 +92,30 @@ class Window(QtWidgets.QWidget):
         flexion_plot.setXLink(self.emg.time_plot)
         legend = flexion_plot.addLegend(offset=(5, 5), labelTextColor=ui.TEXT_COLOR, colCount=5)
         legend.setBrush(ui.BACKGROUND_COLOR)
-        legend.setLabelTextSize(f"{ui.FONT_INFO}pt")  # the caption at the same size as the other info text
-        self.curves = [flexion_plot.plot(pen=pg.mkPen(c, width=2), name=name, connect="finite")
-                       for name, c in FINGER_COLORS.items()]
+        # the caption at the same size as the other info text
+        legend.setLabelTextSize(f"{ui.FONT_INFO}pt")
+        self.curves = [
+            flexion_plot.plot(pen=pg.mkPen(c, width=2), name=name, connect="finite")
+            for name, c in FINGER_COLORS.items()
+        ]
         pinch_ticks = [(v, str(v)) for v in (0, 5, 10, 15)]
         pinch_plot = ui.fixed_plot(graphs, 2, 0, PINCH_RANGE, show_time=True)
         pinch_plot.setLabel("left", "pinch (cm)")
         pinch_plot.getAxis("left").setTicks([pinch_ticks])
         pinch_plot.setXLink(self.emg.time_plot)
         self.curves.append(pinch_plot.plot(pen=pg.mkPen(PINCH_COLOR, width=2), connect="finite"))
-        # Equal total width on the two left axes, so their plot areas start at the same x
-        # and the two x axes (x-linked above) line up. setWidth() pins the tick area and
-        # pyqtgraph adds the rotated label's height (boundingRect * 0.8) on top, so each
-        # axis is sized relative to its own label, against the tallest one.
+        # the same width on both left axes, so the x-linked plots line up; a fixed width is the
+        # axis's whole width (pyqtgraph adds nothing for the label): the ticks plus the label
         fm = QtGui.QFontMetrics(QtGui.QFont(ui.FONT))
         tick_w = max(fm.horizontalAdvance(t) for _, t in flexion_ticks + pinch_ticks) + 10
         axes = [p.getAxis("left") for p in (flexion_plot, pinch_plot)]
-        label_h = [a.label.boundingRect().height() for a in axes]
-        for a, h in zip(axes, label_h, strict=True):
-            a.setWidth(round(tick_w + 0.8 * (max(label_h) - h)))
-        self._left_axes = axes
+        width = round(tick_w + max(a.label.boundingRect().height() for a in axes))
+        for a in axes:
+            a.setWidth(width)
         self._graphs, self._flexion_plot = graphs, flexion_plot
+        # the EMG panel puts the LED buttons back at its right edge on every resize of their plots
+        for vb in [flexion_plot.vb] + [proxy.parentItem().vb for proxy in self.emg.led_buttons]:
+            vb.sigResized.connect(lambda _: QtCore.QTimer.singleShot(0, self._place_led_buttons))
         graphs.ci.layout.setRowStretchFactor(0, 4)
         graphs.ci.layout.setRowStretchFactor(1, 3)
         graphs.ci.layout.setRowStretchFactor(2, 2)
@@ -135,24 +135,14 @@ class Window(QtWidgets.QWidget):
         self.timer.timeout.connect(self.update_hand)
         self.timer.start(30)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        QtCore.QTimer.singleShot(0, self._place_axis_labels)  # after the axes' own resizes
-        QtCore.QTimer.singleShot(0, self._place_led_buttons)
-
-    def _place_axis_labels(self):
-        # pyqtgraph puts a left axis's name at x=-5, where it overlaps the tick labels;
-        # pin it further left, clear of them
-        for a in self._left_axes:
-            a.label.setPos(QtCore.QPointF(-17, a.label.pos().y()))
-
     def _place_led_buttons(self):
         # the EMG panel puts them at its right edge, close to the plots here: centre them
-        # between the EMG traces and these plots
+        # between the EMG traces and these plots (after the layouts settle: deferred)
         corner = self._flexion_plot.vb.sceneBoundingRect().topLeft()
         right_x = self._graphs.mapToGlobal(self._graphs.mapFromScene(corner))
         view = self.emg.graphs
-        for proxy, status in self.emg.led_buttons:
+        for proxy in self.emg.led_buttons:
+            status = proxy.parentItem()
             right = status.mapFromScene(view.mapToScene(view.mapFromGlobal(right_x))).x()
             left = status.mapFromScene(self.emg.time_plot.vb.sceneBoundingRect().topRight()).x()
             proxy.setPos((left + right - ui.BUTTON_SIZE) / 2, proxy.pos().y())
@@ -174,8 +164,10 @@ class Window(QtWidgets.QWidget):
             for i, curve in enumerate(self.curves):
                 curve.setData(self.hand_t[shown], self.fingers[shown, i])
         st = self.tracker.stats()
-        self.camera_status.setText(f"camera: {st['captured']} frames, {st['processed']} processed, "
-                                   f"hand in {self.with_hand}")
+        self.camera_status.setText(
+            f"camera: {st['captured']} frames, {st['processed']} processed, "
+            f"hand in {self.with_hand}"
+        )
         image, frame = self.tracker.latest()
         if image is None:
             return
@@ -195,24 +187,39 @@ EVENT_COLUMNS = ["gesture", "gesture_name", "fingers", "motion", "block", "trial
 def event_descriptions(protocol):
     specs = protocol.specs()
     return {
-        "onset": {"Description": "When the card was drawn (Qt paint, within a display frame of "
-                                 "it showing), from the first EMG sample.", "Units": "s"},
-        "trial_type": {"Levels": {
-            "cue": "The gesture's card in grey: prepare.",
-            "go": "The card lit: perform the gesture once, starting open (pinch) or closed "
-                  "(extension) as the card shows.",
-            "rest": "A relaxed hand: rest.",
-            "break": "A break between blocks, ended by the participant (duration n/a)."}},
-        "gesture": {"Description": "The gesture cued (clvhd.cues.GESTURES)",
-                    "Levels": {g: spec["name"] for g, spec in specs.items()}},
+        "onset": {
+            "Description": "When the card was drawn (Qt paint, within a display frame of "
+            "it showing), from the first EMG sample.",
+            "Units": "s",
+        },
+        "trial_type": {
+            "Levels": {
+                "cue": "The gesture's card in grey: prepare.",
+                "go": "The card lit: perform the gesture once, starting open (pinch) or closed "
+                "(extension) as the card shows.",
+                "rest": "A relaxed hand: rest.",
+                "break": "A break between blocks, ended by the participant (duration n/a).",
+            }
+        },
+        "gesture": {
+            "Description": "The gesture cued (clvhd.cues.GESTURES)",
+            "Levels": {g: spec["name"] for g, spec in specs.items()},
+        },
         "gesture_name": {"Description": "Its name on the card"},
         "fingers": {"Description": "The fingers moving, + separated"},
-        "motion": {"Description": "Their motion: pinch (their tips meeting the thumb's, from an "
-                                  "open hand), extend (straightening from a closed hand), rest"},
+        "motion": {
+            "Description": "Their motion: pinch (their tips meeting the thumb's, from an "
+            "open hand), extend (straightening from a closed hand), rest"
+        },
         "block": {"Description": "Block (one repetition of every gesture), from 1"},
         "trial": {"Description": "Trial in the recording, from 1"},
-        "Protocol": {"Name": protocol.name, "PrepareS": protocol.prepare, "GoS": protocol.go,
-                     "RestS": protocol.rest, "Repetitions": protocol.repetitions},
+        "Protocol": {
+            "Name": protocol.name,
+            "PrepareS": protocol.prepare,
+            "GoS": protocol.go,
+            "RestS": protocol.rest,
+            "Repetitions": protocol.repetitions,
+        },
     }
 
 
@@ -248,20 +255,30 @@ class CueWindow(QtWidgets.QWidget):
         elif key == QtCore.Qt.Key.Key_Space and self.state == "break":
             self.begin("cue")
         elif key == QtCore.Qt.Key.Key_Escape and self.state not in ("ready", "done"):
-            self.finish(f"Arrêté à l'essai {self.k + 1} sur {len(self.order)} : ce qui a été "
-                        "enregistré est sauvegardé")
+            self.finish(
+                f"Arrêté à l'essai {self.k + 1} sur {len(self.order)} : ce qui a été "
+                "enregistré est sauvegardé"
+            )
 
     def begin(self, state):
         """Show ``state``'s card; its event and timing start when it is drawn."""
         self.state, self.phase_end = state, None
         block, gesture = self.order[self.k]
         spec = self.specs[gesture]
-        values = {"gesture": gesture, "gesture_name": spec["name"],
-                  "fingers": "+".join(spec.get("fingers", [])) or "n/a",
-                  "motion": spec["motion"],
-                  "block": block + 1, "trial": self.k + 1}
-        duration = {"cue": self.protocol.prepare, "go": self.protocol.go,
-                    "rest": self.protocol.rest, "break": None}[state]
+        values = {
+            "gesture": gesture,
+            "gesture_name": spec["name"],
+            "fingers": "+".join(spec.get("fingers", [])) or "n/a",
+            "motion": spec["motion"],
+            "block": block + 1,
+            "trial": self.k + 1,
+        }
+        duration = {
+            "cue": self.protocol.prepare,
+            "go": self.protocol.go,
+            "rest": self.protocol.rest,
+            "break": None,
+        }[state]
         if state == "break":  # before the next block: its number only
             values = {"block": block + 1}
         self.pending = (state, duration, values)
@@ -280,8 +297,10 @@ class CueWindow(QtWidgets.QWidget):
             self.k += 1
             if self.k == len(self.order):
                 self.finish(f"Terminé : {len(self.order)} essais enregistrés. Merci !")
-            elif self.order[self.k][0] != self.order[self.k - 1][0] and \
-                    self.order[self.k][0] % self.protocol.break_every == 0:
+            elif (
+                self.order[self.k][0] != self.order[self.k - 1][0]
+                and self.order[self.k][0] % self.protocol.break_every == 0
+            ):
                 self.begin("break")
             else:
                 self.begin("cue")
@@ -302,20 +321,27 @@ class CueWindow(QtWidgets.QWidget):
             qp.setFont(font)
             qp.setPen(QtGui.QColor(ui.TEXT_COLOR))
             if self.state == "ready":
-                text = (f"{self.protocol.name} : {len(self.specs)} gestes x "
-                        f"{self.protocol.repetitions}, environ {self.protocol.duration() / 60:.0f} min\n\n"
-                        "Quand la main s'allume, faites son geste une seule fois :\n"
-                        "pincement, commencez la main ouverte ; extension, commencez la main "
-                        "fermée.\nLes doigts marqués en blanc rejoignent le pouce (pincement) ou "
-                        "suivent la flèche (extension). Relâchez ensuite la main.\n\n"
-                        "Appuyez sur Espace pour commencer")
+                text = (
+                    f"{self.protocol.name} : {len(self.specs)} gestes x "
+                    f"{self.protocol.repetitions}, environ {self.protocol.duration() / 60:.0f} min\n\n"
+                    "Quand la main s'allume, faites son geste une seule fois :\n"
+                    "pincement, commencez la main ouverte ; extension, commencez la main "
+                    "fermée.\nLes doigts marqués en blanc rejoignent le pouce (pincement) ou "
+                    "suivent la flèche (extension). Relâchez ensuite la main.\n\n"
+                    "Appuyez sur Espace pour commencer"
+                )
             elif self.state == "break":
-                text = (f"Pause\n\nbloc {self.order[self.k][0] + 1} sur {self.protocol.repetitions} "
-                        "ensuite\n\nEspace pour continuer")
+                text = (
+                    f"Pause\n\nbloc {self.order[self.k][0] + 1} sur {self.protocol.repetitions} "
+                    "ensuite\n\nEspace pour continuer"
+                )
             else:
                 text = ""
-            qp.drawText(self.rect().adjusted(40, 40, -40, -40), QtCore.Qt.AlignmentFlag.AlignCenter,
-                        text + ("\n\n" + self.message if self.message else ""))
+            qp.drawText(
+                self.rect().adjusted(40, 40, -40, -40),
+                QtCore.Qt.AlignmentFlag.AlignCenter,
+                text + ("\n\n" + self.message if self.message else ""),
+            )
             if self.state == "break":
                 self.stamp()
             return
@@ -326,33 +352,58 @@ class CueWindow(QtWidgets.QWidget):
         font.setPointSize(ui.FONT_MESSAGE)
         qp.setFont(font)
         qp.setPen(QtGui.QColor(accent if lit else ui.TEXT_COLOR))
-        qp.drawText(QtCore.QRectF(0, 0.04 * h, w, 0.1 * h), QtCore.Qt.AlignmentFlag.AlignCenter,
-                    "repos" if self.state == "rest" else spec["name"])
-        cues.draw_card(qp, QtCore.QRectF(0.1 * w, 0.14 * h, 0.8 * w, 0.66 * h), spec, lit,
-                       accent=accent, dim=ui.FLAT_COLOR)
+        qp.drawText(
+            QtCore.QRectF(0, 0.04 * h, w, 0.1 * h),
+            QtCore.Qt.AlignmentFlag.AlignCenter,
+            "repos" if self.state == "rest" else spec["name"],
+        )
+        cues.draw_card(
+            qp,
+            QtCore.QRectF(0.1 * w, 0.14 * h, 0.8 * w, 0.66 * h),
+            spec,
+            lit,
+            accent=accent,
+            dim=ui.FLAT_COLOR,
+        )
         if self.state == "cue":  # the seconds to the go
-            left = self.protocol.prepare if self.phase_end is None else self.phase_end - time.monotonic()
+            left = (
+                self.protocol.prepare
+                if self.phase_end is None
+                else self.phase_end - time.monotonic()
+            )
             font.setPointSize(ui.FONT_COUNTDOWN)
             qp.setFont(font)
             qp.setPen(QtGui.QColor(ui.TEXT_COLOR))
-            qp.drawText(QtCore.QRectF(0, 0.8 * h, w, 0.12 * h), QtCore.Qt.AlignmentFlag.AlignCenter,
-                        str(max(1, int(np.ceil(left)))))
+            qp.drawText(
+                QtCore.QRectF(0, 0.8 * h, w, 0.12 * h),
+                QtCore.Qt.AlignmentFlag.AlignCenter,
+                str(max(1, int(np.ceil(left)))),
+            )
         elif self.state == "go":  # the starting position, where the countdown was
             motion = spec.get("motion")
-            hint = ({"pinch": "main ouverte", "extend": "main fermée"}.get(motion)
-                    if isinstance(motion, str) else None)
+            hint = (
+                {"pinch": "main ouverte", "extend": "main fermée"}.get(motion)
+                if isinstance(motion, str)
+                else None
+            )
             if hint:
                 font.setPointSize(ui.FONT_MESSAGE)
                 qp.setFont(font)
                 qp.setPen(QtGui.QColor(accent))
-                qp.drawText(QtCore.QRectF(0, 0.8 * h, w, 0.12 * h),
-                            QtCore.Qt.AlignmentFlag.AlignCenter, hint)
+                qp.drawText(
+                    QtCore.QRectF(0, 0.8 * h, w, 0.12 * h),
+                    QtCore.Qt.AlignmentFlag.AlignCenter,
+                    hint,
+                )
         font.setPointSize(ui.FONT_INFO)
         qp.setFont(font)
         qp.setPen(QtGui.QColor(ui.FLAT_COLOR))
-        qp.drawText(QtCore.QRectF(0, 0.92 * h, w, 0.06 * h), QtCore.Qt.AlignmentFlag.AlignCenter,
-                    f"bloc {block + 1} / {self.protocol.repetitions}    essai {self.k + 1} / "
-                    f"{len(self.order)}    Échap pour arrêter")
+        qp.drawText(
+            QtCore.QRectF(0, 0.92 * h, w, 0.06 * h),
+            QtCore.Qt.AlignmentFlag.AlignCenter,
+            f"bloc {block + 1} / {self.protocol.repetitions}    essai {self.k + 1} / "
+            f"{len(self.order)}    Échap pour arrêter",
+        )
         self.stamp()
 
     def stamp(self):
@@ -373,8 +424,13 @@ with clvhd.Wristband(args.port, expected_modules=args.modules) as wb:
     protocol = cues.Protocol.load(args.protocol) if args.protocol else None
     with HandTracker(camera) as tracker, wb.stream() as stream:
         app = ui.application()
-        window = Window(wb, stream, tracker, EVENT_COLUMNS if protocol else None,
-                        event_descriptions(protocol) if protocol else None)
+        window = Window(
+            wb,
+            stream,
+            tracker,
+            EVENT_COLUMNS if protocol else None,
+            event_descriptions(protocol) if protocol else None,
+        )
         window.show()
         if protocol:
             cue_window = CueWindow(protocol, window.recorder)

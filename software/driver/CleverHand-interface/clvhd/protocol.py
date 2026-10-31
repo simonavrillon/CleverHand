@@ -11,6 +11,7 @@ import serial.tools.list_ports
 FW_MIN = (4, 1)  # oldest Teensy firmware this driver works with (v4.0 misses ~10% of the samples)
 
 # reply status of the 's' command: 0 ok, then these
+# (CLVHD_INIT_STUCK / CLVHD_INIT_TOO_MANY in the firmware)
 INIT_STUCK, INIT_TOO_MANY = 1, 2
 
 FRAME_SYNC = 0xA5
@@ -118,24 +119,26 @@ class Controller:
         if (major, minor) < FW_MIN:
             raise ControllerError(
                 f"Teensy firmware v{major}.{minor} is too old: flash "
-                f"firmware/uctrl_teensy (v{FW_MIN[0]}.{FW_MIN[1]} or newer)")
+                f"firmware/uctrl_teensy (v{FW_MIN[0]}.{FW_MIN[1]} or newer)"
+            )
         return major, minor
 
-    def mirror(self, b=(1, 2, 3)):
-        self._send(b"m" + bytes(b))
-        return tuple(self._reply()) == tuple(b)
+    def mirror(self, data=(1, 2, 3)):
+        self._send(b"m" + bytes(data))
+        return tuple(self._reply()) == tuple(data)
 
     def address_modules(self):
-        """Run the module addressing; return the number of modules."""
+        """Run the module addressing; return ``(nb_modules, status)``."""
         self._send(b"s")
         data = self._reply()
-        nb, status = data[0], data[1]
+        nb_modules, status = data[0], data[1]
         if status == INIT_STUCK:
             raise ControllerError(
                 "Module addressing stuck: a module never received its address. "
                 "Check the ribbon cables (IO1 line), then power-cycle the "
-                "wristband with the Teensy")
-        return nb, status
+                "wristband with the Teensy"
+            )
+        return nb_modules, status
 
     def set_spi_clock(self, hz):
         self._send(b"c" + struct.pack("<I", int(hz)))
@@ -159,10 +162,10 @@ class Controller:
         cmd = bytes([reg | 0x80])
         self._send(b"r" + struct.pack("<IBB", mask, n, len(cmd)) + cmd)
         data = self._reply()
-        nb = bin(mask).count("1")
-        if len(data) != n * nb:
-            raise ControllerError(f"Expected {n * nb} bytes, got {len(data)}")
-        return np.frombuffer(data, dtype=np.uint8).reshape(nb, n)
+        nb_modules = mask.bit_count()
+        if len(data) != n * nb_modules:
+            raise ControllerError(f"Expected {n * nb_modules} bytes, got {len(data)}")
+        return np.frombuffer(data, dtype=np.uint8).reshape(nb_modules, n)
 
     def write_regs(self, mask, reg, values):
         """Write ``values`` to the registers from ``reg`` on every masked module."""
@@ -185,7 +188,7 @@ class Controller:
         self.ser.timeout = 0.05
         while time.monotonic() < t_end:
             chunk = self.ser.read(max(1, self.ser.in_waiting))
-            tail = (tail + chunk)[-4 * FRAME_SIZE:]
+            tail = (tail + chunk)[-4 * FRAME_SIZE :]
             if bytes([FRAME_SYNC, FRAME_END]) in tail:
                 break
         self.ser.timeout = self.timeout

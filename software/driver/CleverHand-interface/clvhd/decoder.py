@@ -2,24 +2,9 @@
 
 ``examples/03_cursor_centerout.py`` fits it on a cued calibration and uses it fixed, with an
 output stage; ``examples/04_cursor_coadapt.py`` starts from that fit and refits its weights
-every 20 s (``clvhd.coadapt``).
-
-- Features: each channel's envelope e (mV) as log(e + floor), the floor its median at rest
-  on the calibration, z-scored on the calibration, over the last ``LAGS`` frames, plus a
-  constant. The log turns each electrode's gain into an offset and steadies the noise (on
-  recorded calibrations: +0.07-0.1 R^2, and decoders that transfer between sessions, where
-  linear envelopes failed); the z-score makes the ridge penalty relative to the data,
-  whatever the envelope's scale.
-- ``WienerFilter.fit``: ridge regression of the velocity on them, the penalty picked by
-  cross-validation over the cues.
-- Output stage (03 only): a gain per target direction, interpolated by the decoded velocity's
-  angle, undoing the ridge's shrinkage direction by direction (on the calibration's
-  cross-validated predictions, the decoded speed towards each target matches the label's; a
-  gain per half-axis would not: the diagonals set it), a dead-zone (the 75th percentile of
-  the decoded speed at rest), and a speed curve
-  ``speed * ((s - deadzone) / (speed - deadzone)) ** power`` anchored at the calibration's
-  speed: the calibrated contraction keeps its speed, a stronger one goes faster than
-  proportionally when ``power`` > 1, a weaker one slower (finer positioning).
+every 20 s (``clvhd.coadapt``). Features: each channel's envelope u as log(u + floor), z-scored,
+over the last ``LAGS`` frames, plus a constant; ``WienerFilter.fit`` picks the ridge penalty by
+cross-validation over the cues. Design notes: docs/experiments.md.
 
 Units: velocities in cm/s, envelopes in mV.
 """
@@ -31,7 +16,9 @@ RIDGES = (1e-4, 1e-3, 1e-2, 1e-1, 1.0)  # relative penalties tried, times the me
 FOLDS = 5
 N_DIRECTIONS = 8  # of the direction gains: the center-out targets'
 GAIN_RANGE = (0.5, 5.0)  # direction gains kept within
-DEADZONE_PERCENTILE = 75  # of the decoded speed at rest on the calibration (95: about half its speed)
+DEADZONE_PERCENTILE = (
+    75  # of the decoded speed at rest on the calibration (95: about half its speed)
+)
 
 
 def lagged(Z, lags):
@@ -39,7 +26,7 @@ def lagged(Z, lags):
     T, C = Z.shape
     X = np.zeros((T, lags * C))
     for k in range(lags):
-        X[k:, k * C:(k + 1) * C] = Z[:T - k]
+        X[k:, k * C : (k + 1) * C] = Z[: T - k]
     return X
 
 
@@ -84,8 +71,20 @@ class WienerFilter:
     weights of one's own (04's). ``save`` / ``load``: an .npz.
     """
 
-    def __init__(self, weights, mean, sd, lags=LAGS, ridge=None, cv_r2=None, gains=None,
-                 speed=np.nan, deadzone=0.0, power=1.0, floor=None):
+    def __init__(
+        self,
+        weights,
+        mean,
+        sd,
+        lags=LAGS,
+        ridge=None,
+        cv_r2=None,
+        gains=None,
+        speed=np.nan,
+        deadzone=0.0,
+        power=1.0,
+        floor=None,
+    ):
         self.weights = np.asarray(weights, dtype=float)  # (lags * C + 1, 2), the bias last
         self.mean, self.sd = np.asarray(mean, dtype=float), np.asarray(sd, dtype=float)
         self.floor = None if floor is None else np.asarray(floor, dtype=float)
@@ -105,10 +104,10 @@ class WienerFilter:
         return ((E if self.floor is None else np.log(E + self.floor)) - self.mean) / self.sd
 
     @classmethod
-    def fit(cls, U, V, groups, mask=None, lags=LAGS, ridges=RIDGES, folds=FOLDS):
-        """Fit on envelopes ``U`` (T, C) and velocities ``V`` (T, 2), on the frames of ``mask``.
+    def fit(cls, U, V, groups, in_fit=None, lags=LAGS, ridges=RIDGES, folds=FOLDS):
+        """Fit on envelopes ``U`` (T, C) and velocities ``V`` (T, 2), on the frames of ``in_fit``.
 
-        The floor is each channel's median envelope on the frames of ``mask`` labelled rest
+        The floor is each channel's median envelope on the frames of ``in_fit`` labelled rest
         (V = 0). The ridge is the one of ``ridges`` with the best mean cross-validated R^2,
         ``folds`` folds of consecutive ``groups`` (the cue of each frame); the history spans
         the whole recording, so the lags of the first frames of a fold are its neighbour's
@@ -116,34 +115,35 @@ class WienerFilter:
         new reach sees.
         """
         V, groups = np.asarray(V, dtype=float), np.asarray(groups)
-        mask = np.ones(len(V), bool) if mask is None else np.asarray(mask, bool)
+        in_fit = np.ones(len(V), bool) if in_fit is None else np.asarray(in_fit, bool)
         E = cls._clip(U)
-        rest = mask & ~V.any(axis=1)
-        floor = np.median(E[rest if rest.any() else mask], axis=0)
+        rest = in_fit & ~V.any(axis=1)
+        floor = np.median(E[rest if rest.any() else in_fit], axis=0)
         floor = np.maximum(floor, 1e-6 * max(floor.max(), 1e-30))
         F = np.log(E + floor)
-        mean = F[mask].mean(axis=0)
-        sd = F[mask].std(axis=0)
+        mean = F[in_fit].mean(axis=0)
+        sd = F[in_fit].std(axis=0)
         sd = np.where(sd > 1e-9 * max(sd.max(), 1e-30), sd, 1.0)  # a constant channel stays 0
         X = lagged((F - mean) / sd, lags)
-        X, V, groups = X[mask], V[mask], groups[mask]
+        X, V, groups = X[in_fit], V[in_fit], groups[in_fit]
         cues = np.unique(groups)
         chunks = np.array_split(cues, min(folds, len(cues)))
         fold_of = np.zeros(len(groups), int)
-        for f, chunk in enumerate(chunks):
-            fold_of[np.isin(groups, chunk)] = f
+        for fold, chunk in enumerate(chunks):
+            fold_of[np.isin(groups, chunk)] = fold
         scores, predictions = [], []
         for ridge in ridges:
             P = np.zeros_like(V)
-            for f in range(len(chunks)):
-                test = fold_of == f
+            for fold in range(len(chunks)):
+                test = fold_of == fold
                 W = _ridge(X[~test], V[~test], ridge)
                 P[test] = np.column_stack([X[test], np.ones(test.sum())]) @ W
             scores.append(r2(V, P))
             predictions.append(P)
         best = int(np.argmax([s.mean() for s in scores]))
-        wf = cls(_ridge(X, V, ridges[best]), mean, sd, lags, ridges[best], scores[best],
-                 floor=floor)
+        wf = cls(
+            _ridge(X, V, ridges[best]), mean, sd, lags, ridges[best], scores[best], floor=floor
+        )
         wf.set_output(predictions[best], V)
         return wf
 
@@ -171,8 +171,10 @@ class WienerFilter:
         if not np.isfinite(self.speed) or (self.deadzone == 0 and self.power == 1):
             return v
         s = np.linalg.norm(v, axis=-1, keepdims=True)
-        out = self.speed * (np.clip(s - self.deadzone, 0, None) /
-                            (self.speed - self.deadzone)) ** self.power
+        out = (
+            self.speed
+            * (np.clip(s - self.deadzone, 0, None) / (self.speed - self.deadzone)) ** self.power
+        )
         return v * np.divide(out, s, out=np.zeros_like(s), where=s > 0)
 
     def reset(self):
@@ -198,28 +200,44 @@ class WienerFilter:
         return v if linear else self.output(v)
 
     def save(self, path, **extra):
-        np.savez(path, weights=self.weights, mean=self.mean, sd=self.sd, lags=self.lags,
-                 ridge=np.nan if self.ridge is None else self.ridge,
-                 cv_r2=np.full(2, np.nan) if self.cv_r2 is None else self.cv_r2,
-                 gains=self.gains, speed=self.speed, deadzone=self.deadzone, power=self.power,
-                 floor=np.full(len(self.mean), np.nan) if self.floor is None else self.floor,
-                 **extra)
+        np.savez(
+            path,
+            weights=self.weights,
+            mean=self.mean,
+            sd=self.sd,
+            lags=self.lags,
+            ridge=np.nan if self.ridge is None else self.ridge,
+            cv_r2=np.full(2, np.nan) if self.cv_r2 is None else self.cv_r2,
+            gains=self.gains,
+            speed=self.speed,
+            deadzone=self.deadzone,
+            power=self.power,
+            floor=np.full(len(self.mean), np.nan) if self.floor is None else self.floor,
+            **extra,
+        )
 
     @classmethod
     def load(cls, path):
         with np.load(path) as f:
-            if "floor" not in f or not np.isfinite(f["floor"]).all() or "gains" not in f:
-                raise ValueError(f"{path}: a decoder of an earlier version (linear envelopes, or no "
-                                 "output stage): calibrate again with 03_cursor_centerout.py")
-            return cls(f["weights"], f["mean"], f["sd"], int(f["lags"]), float(f["ridge"]),
-                       f["cv_r2"], f["gains"], float(f["speed"]), float(f["deadzone"]),
-                       float(f["power"]), f["floor"])
+            return cls(
+                f["weights"],
+                f["mean"],
+                f["sd"],
+                int(f["lags"]),
+                float(f["ridge"]),
+                f["cv_r2"],
+                f["gains"],
+                float(f["speed"]),
+                float(f["deadzone"]),
+                float(f["power"]),
+                f["floor"],
+            )
 
 
 def channel_indices(path, labels):
     """Indices in ``labels`` of the channels the decoder saved at ``path`` was fitted on."""
     with np.load(path) as f:
-        names = [str(c) for c in f["channels"]]
+        names = [str(c) for c in f["decoder_channels"]]
     missing = [n for n in names if n not in labels]
     if missing:
         raise ValueError(f"{path} uses channels this wristband does not have: {', '.join(missing)}")

@@ -56,6 +56,7 @@ DEFAULT_ROOT = Path(__file__).resolve().parent.parent / "data"
 @dataclass(frozen=True)
 class Entities:
     """The entities naming a recording: ``sub-<subject>[_ses-<session>]_task-<task>[_acq-][_run-]``."""
+
     subject: str
     task: str
     session: str | None = None
@@ -69,8 +70,14 @@ class Entities:
                 raise ValueError(f"BIDS {f.name} must be letters and digits only, not {value!r}")
 
     def label(self, tracksys=None):
-        pairs = [("sub", self.subject), ("ses", self.session), ("task", self.task),
-                 ("tracksys", tracksys), ("acq", self.acquisition), ("run", self.run)]
+        pairs = [
+            ("sub", self.subject),
+            ("ses", self.session),
+            ("task", self.task),
+            ("tracksys", tracksys),
+            ("acq", self.acquisition),
+            ("run", self.run),
+        ]
         return "_".join(f"{k}-{v}" for k, v in pairs if v)
 
     @property
@@ -115,14 +122,24 @@ def write_dataset(root):
     root.mkdir(parents=True, exist_ok=True)
     desc = root / "dataset_description.json"
     if not desc.exists():
-        write_json(desc, {
-            "Name": root.name, "BIDSVersion": BIDS_VERSION, "DatasetType": "raw",
-            "License": "n/a", "Authors": [],
-            "GeneratedBy": [{"Name": "clvhd", "Version": __version__, "CodeURL": CODE_URL}]})
+        write_json(
+            desc,
+            {
+                "Name": root.name,
+                "BIDSVersion": BIDS_VERSION,
+                "DatasetType": "raw",
+                "License": "n/a",
+                "Authors": [],
+                "GeneratedBy": [{"Name": "clvhd", "Version": __version__, "CodeURL": CODE_URL}],
+            },
+        )
     readme = root / "README"
     if not readme.exists():
-        readme.write_text(f"# {root.name}\n\nSurface EMG recorded with the CleverHand wristband "
-                          "(ADS1293 modules, dry electrodes).\n", encoding="utf-8")
+        readme.write_text(
+            f"# {root.name}\n\nSurface EMG recorded with the CleverHand wristband "
+            "(ADS1293 modules, dry electrodes).\n",
+            encoding="utf-8",
+        )
 
 
 def write_participant(root, subject, age=None, sex=None, handedness=None):
@@ -130,14 +147,25 @@ def write_participant(root, subject, age=None, sex=None, handedness=None):
     root = Path(root)
     parts_json = root / "participants.json"
     if not parts_json.exists():
-        write_json(parts_json, {
-            "participant_id": {"Description": "Unique participant identifier."},
-            "age": {"Description": "Age of the participant.", "Units": "years"},
-            "sex": {"Description": "Biological sex of the participant.",
-                    "Levels": {"M": "male", "F": "female", "O": "other"}},
-            "handedness": {"Description": "Handedness of the participant.",
-                           "Levels": {"right": "right-handed", "left": "left-handed",
-                                      "ambidextrous": "ambidextrous"}}})
+        write_json(
+            parts_json,
+            {
+                "participant_id": {"Description": "Unique participant identifier."},
+                "age": {"Description": "Age of the participant.", "Units": "years"},
+                "sex": {
+                    "Description": "Biological sex of the participant.",
+                    "Levels": {"M": "male", "F": "female", "O": "other"},
+                },
+                "handedness": {
+                    "Description": "Handedness of the participant.",
+                    "Levels": {
+                        "right": "right-handed",
+                        "left": "left-handed",
+                        "ambidextrous": "ambidextrous",
+                    },
+                },
+            },
+        )
     path = root / "participants.tsv"
     header = ["participant_id", "age", "sex", "handedness"]
     rows = read_tsv(path) if path.exists() else []
@@ -169,9 +197,15 @@ def write_scans(root, ent, files, acq):
     write_tsv(path, ["filename", "acq_time"], sorted(rows.items()))
     sidecar = path.with_suffix(".json")
     if not sidecar.exists():
-        write_json(sidecar, {"acq_time": {
-            "Description": "Wall-clock time of the first EMG sample of the recording; the motion "
-                           "and beh files of a recording share it, their time columns counting from it."}})
+        write_json(
+            sidecar,
+            {
+                "acq_time": {
+                    "Description": "Wall-clock time of the first EMG sample of the recording; the motion "
+                    "and beh files of a recording share it, their time columns counting from it."
+                }
+            },
+        )
 
 
 BLOCK_RECORDS = 16  # data records converted at a time (16 x 3 s at the default rate)
@@ -185,7 +219,7 @@ def _scan(data, size):
     missing, last = np.zeros(c, dtype=np.int64), np.full(c, -1)
     lo, hi = np.full(c, np.inf), np.full(c, -np.inf)
     for a in range(0, n, size):
-        x = np.asarray(data[a:a + size], dtype=np.float64)
+        x = np.asarray(data[a : a + size], dtype=np.float64)
         nan = np.isnan(x)
         missing += nan.sum(axis=0)
         lo = np.fmin(lo, np.nanmin(np.where(nan, np.inf, x), axis=0))
@@ -200,24 +234,24 @@ def _filled_blocks(t, data, size, last_valid):
     nearest valid samples before and after, wherever they are (held at the ends; 0 for a channel
     with none). ``last_valid``: per channel, the index of its last valid sample (``_scan``)."""
     n, c = data.shape
-    prev_t, prev_v = np.full(c, np.nan), np.full(c, np.nan)
+    t_prev, v_prev = np.full(c, np.nan), np.full(c, np.nan)
     for a in range(0, n, size):
-        x = np.array(data[a:a + size], dtype=np.float64)
-        tb = np.asarray(t[a:a + size], dtype=np.float64)
+        x = np.array(data[a : a + size], dtype=np.float64)
+        tb = np.asarray(t[a : a + size], dtype=np.float64)
         nan = np.isnan(x)
         for ch in np.flatnonzero(nan.any(axis=0)):
             ok = ~nan[:, ch]
             ts, vs = [tb[ok]], [x[ok, ch]]
-            if not np.isnan(prev_t[ch]):
-                ts.insert(0, prev_t[ch:ch + 1])
-                vs.insert(0, prev_v[ch:ch + 1])
+            if not np.isnan(t_prev[ch]):
+                ts.insert(0, t_prev[ch : ch + 1])
+                vs.insert(0, v_prev[ch : ch + 1])
             if not ok[-1] and last_valid[ch] >= a + len(x):  # the next valid sample is further on
                 j = a + len(x)
                 while True:
-                    seg = np.asarray(data[j:j + size, ch])
+                    seg = np.asarray(data[j : j + size, ch])
                     hit = np.flatnonzero(~np.isnan(seg))
                     if len(hit):
-                        ts.append(np.asarray(t[j + hit[0]:j + hit[0] + 1], dtype=np.float64))
+                        ts.append(np.asarray(t[j + hit[0] : j + hit[0] + 1], dtype=np.float64))
                         vs.append(seg[hit[:1]].astype(np.float64))
                         break
                     j += size
@@ -225,7 +259,7 @@ def _filled_blocks(t, data, size, last_valid):
             x[:, ch] = np.interp(tb, ts_c, vs_c) if len(ts_c) else 0.0
         has = (~nan).any(axis=0)
         idx = len(x) - 1 - np.argmax(~nan[::-1], axis=0)
-        prev_t[has], prev_v[has] = tb[idx[has]], x[idx[has], np.flatnonzero(has)]
+        t_prev[has], v_prev[has] = tb[idx[has]], x[idx[has], np.flatnonzero(has)]
         yield x
 
 
@@ -254,13 +288,31 @@ def _record_duration(fs):
 
 def channel_electrodes(cfg, nb_modules):
     """(signal electrode, reference electrode) of each channel, named M<module>E<input>."""
-    return [(f"M{m}E{cfg.route[ch][0]}", f"M{m}E{cfg.route[ch][1]}")
-            for m in range(nb_modules) for ch in range(3)]
+    return [
+        (f"M{m}E{cfg.route[ch][0]}", f"M{m}E{cfg.route[ch][1]}")
+        for m in range(nb_modules)
+        for ch in range(3)
+    ]
 
 
-def write_emg(root, ent, t_host, data, cfg, labels, *, start=None, powerline_freq=None,
-              muscles=None, placement_description=None, contact=None, task_description=None,
-              firmware=None, stats=None, file_format="edf"):
+def write_emg(
+    root,
+    ent,
+    t_host,
+    data,
+    cfg,
+    labels,
+    *,
+    start=None,
+    powerline_freq=None,
+    muscles=None,
+    placement_description=None,
+    contact=None,
+    task_description=None,
+    firmware=None,
+    stats=None,
+    file_format="edf",
+):
     """Write the EMG of one recording (``data``: (N, channels) in V, NaN where missing, at host
     times ``t_host``) as ``file_format`` "edf" or "bdf". ``start``: the ``acq_time`` of the first
     sample (default: from ``t_host[0]``, valid only on the computer's current boot).
@@ -302,10 +354,19 @@ def write_emg(root, ent, t_host, data, cfg, labels, *, start=None, powerline_fre
         headers = []
         for c, name in enumerate(labels):
             pmin[c], pmax[c] = _physical_range(float(lo[c]), float(hi[c]))
-            headers.append({"label": name, "dimension": UNITS, "sample_frequency": fs,
-                            "physical_min": int(pmin[c]), "physical_max": int(pmax[c]),
-                            "digital_min": dmin, "digital_max": dmax, "transducer": "",
-                            "prefilter": ""})
+            headers.append(
+                {
+                    "label": name,
+                    "dimension": UNITS,
+                    "sample_frequency": fs,
+                    "physical_min": int(pmin[c]),
+                    "physical_max": int(pmax[c]),
+                    "digital_min": dmin,
+                    "digital_max": dmax,
+                    "transducer": "",
+                    "prefilter": "",
+                }
+            )
         writer.setSignalHeaders(headers)
         step = (pmax - pmin) / (dmax - dmin)  # µV per digital unit
         for chunk in _filled_blocks(t_host, data, block, last_valid):
@@ -315,7 +376,12 @@ def write_emg(root, ent, t_host, data, cfg, labels, *, start=None, powerline_fre
             # rounded to the nearest step here: pyedflib's physical writes truncate
             dig = np.clip(np.rint((uv - pmin) / step + dmin), dmin, dmax).astype(np.int32)
             for r in range(0, len(dig), spr):  # channel after channel within a record
-                if writer.blockWriteDigitalSamples(np.ascontiguousarray(dig[r:r + spr].T).ravel()) < 0:
+                if (
+                    writer.blockWriteDigitalSamples(
+                        np.ascontiguousarray(dig[r : r + spr].T).ravel()
+                    )
+                    < 0
+                ):
                     raise OSError("pyedflib could not write a data record")
     finally:
         writer.close()
@@ -331,78 +397,177 @@ def write_emg(root, ent, t_host, data, cfg, labels, *, start=None, powerline_fre
         m, ch = divmod(c, 3)
         enabled = cfg.enable[ch]
         status = "good" if good[c] else "bad"
-        status_desc = ("channel disabled" if not enabled else contact[c] or
-                       (f"{n_missing[c]} missing samples interpolated" if n_missing[c] else "n/a"))
+        status_desc = (
+            "channel disabled"
+            if not enabled
+            else contact[c]
+            or (f"{n_missing[c]} missing samples interpolated" if n_missing[c] else "n/a")
+        )
         pos, neg = cfg.route[ch]
-        ied = (ELECTRODE_PITCH_MM * abs(ELECTRODE_ORDER.index(pos) - ELECTRODE_ORDER.index(neg))
-               if pos in ELECTRODE_ORDER and neg in ELECTRODE_ORDER else None)
-        rows.append([name, "EMG", UNITS, f"Bipolar channel {ch + 1} of module {m}", f"{fs:.10g}",
-                     pairs[c][0], pairs[c][1], f"M{m}", muscles.get(m, "n/a"), BOARD, ied,
-                     0, "n/a", "n/a", status, status_desc, int(n_missing[c]), f"{step[c]:.4g}"])
+        ied = (
+            ELECTRODE_PITCH_MM * abs(ELECTRODE_ORDER.index(pos) - ELECTRODE_ORDER.index(neg))
+            if pos in ELECTRODE_ORDER and neg in ELECTRODE_ORDER
+            else None
+        )
+        rows.append(
+            [
+                name,
+                "EMG",
+                UNITS,
+                f"Bipolar channel {ch + 1} of module {m}",
+                f"{fs:.10g}",
+                pairs[c][0],
+                pairs[c][1],
+                f"M{m}",
+                muscles.get(m, "n/a"),
+                BOARD,
+                ied,
+                0,
+                "n/a",
+                "n/a",
+                status,
+                status_desc,
+                int(n_missing[c]),
+                f"{step[c]:.4g}",
+            ]
+        )
     channels = emg_dir / f"{label}_channels.tsv"
-    write_tsv(channels, ["name", "type", "units", "description", "sampling_frequency",
-                          "signal_electrode", "reference", "group", "target_muscle", "grid_name",
-                          "interelectrode_distance", "low_cutoff", "high_cutoff", "notch", "status",
-                          "status_description", "n_interpolated", "resolution"], rows)
-    write_json(channels.with_suffix(".json"), {
-        "reference": {"Description": "The channel's negative input: every channel is bipolar, "
-                                     "between two neighbouring electrodes of the same module."},
-        "group": {"Description": "Module (M0, M1, ...) the channel belongs to, in chain order."},
-        "target_muscle": {"Description": "Muscle under the module."},
-        "grid_name": {"Description": "Electrode board of the module."},
-        "interelectrode_distance": {"Description": "Distance between the channel's two electrodes.",
-                                    "Units": "mm"},
-        "low_cutoff": {"Description": "The ADS1293 is DC-coupled.", "Units": "Hz"},
-        "n_interpolated": {"Description": "Samples missing from the stream (dropped or late "
-                                          "frames), filled by linear interpolation.",
-                           "Units": "samples"},
-        "resolution": {"Description": f"Step of the {file_format.upper()} encoding: the channel's "
-                                      "range in the recording over the format's digital range "
-                                      "(EDF 65536 steps, BDF 16777216).", "Units": UNITS}})
+    write_tsv(
+        channels,
+        [
+            "name",
+            "type",
+            "units",
+            "description",
+            "sampling_frequency",
+            "signal_electrode",
+            "reference",
+            "group",
+            "target_muscle",
+            "grid_name",
+            "interelectrode_distance",
+            "low_cutoff",
+            "high_cutoff",
+            "notch",
+            "status",
+            "status_description",
+            "n_interpolated",
+            "resolution",
+        ],
+        rows,
+    )
+    write_json(
+        channels.with_suffix(".json"),
+        {
+            "reference": {
+                "Description": "The channel's negative input: every channel is bipolar, "
+                "between two neighbouring electrodes of the same module."
+            },
+            "group": {
+                "Description": "Module (M0, M1, ...) the channel belongs to, in chain order."
+            },
+            "target_muscle": {"Description": "Muscle under the module."},
+            "grid_name": {"Description": "Electrode board of the module."},
+            "interelectrode_distance": {
+                "Description": "Distance between the channel's two electrodes.",
+                "Units": "mm",
+            },
+            "low_cutoff": {"Description": "The ADS1293 is DC-coupled.", "Units": "Hz"},
+            "n_interpolated": {
+                "Description": "Samples missing from the stream (dropped or late "
+                "frames), filled by linear interpolation.",
+                "Units": "samples",
+            },
+            "resolution": {
+                "Description": f"Step of the {file_format.upper()} encoding: the channel's "
+                "range in the recording over the format's digital range "
+                "(EDF 65536 steps, BDF 16777216).",
+                "Units": UNITS,
+            },
+        },
+    )
 
     # electrodes: module-local coordinates along each board's row of pads
     electrodes = emg_dir / f"{ent.session_prefix}_electrodes.tsv"
-    write_tsv(electrodes, ["name", "x", "y", "z", "coordinate_system", "type", "material",
-                            "impedance", "group"],
-               [[f"M{m}E{e}", ELECTRODE_PITCH_MM * k, 0.0, "n/a", SPACE, "dry", "gold-plated",
-                 "n/a", f"M{m}"] for m in range(nb_modules) for k, e in enumerate(ELECTRODE_ORDER)])
+    write_tsv(
+        electrodes,
+        ["name", "x", "y", "z", "coordinate_system", "type", "material", "impedance", "group"],
+        [
+            [
+                f"M{m}E{e}",
+                ELECTRODE_PITCH_MM * k,
+                0.0,
+                "n/a",
+                SPACE,
+                "dry",
+                "gold-plated",
+                "n/a",
+                f"M{m}",
+            ]
+            for m in range(nb_modules)
+            for k, e in enumerate(ELECTRODE_ORDER)
+        ],
+    )
     coordsys = emg_dir / f"{ent.session_prefix}_space-{SPACE}_coordsystem.json"
-    write_json(coordsys, {
-        "EMGCoordinateSystem": "Other", "EMGCoordinateUnits": "mm",
-        "EMGCoordinateSystemDescription":
-            f"Local coordinates on each module's {BOARD} board: x along its row of six electrodes "
+    write_json(
+        coordsys,
+        {
+            "EMGCoordinateSystem": "Other",
+            "EMGCoordinateUnits": "mm",
+            "EMGCoordinateSystemDescription": f"Local coordinates on each module's {BOARD} board: x along its row of six electrodes "
             f"({' '.join(f'E{e}' for e in ELECTRODE_ORDER)}, {ELECTRODE_PITCH_MM} mm apart) from "
             f"E{ELECTRODE_ORDER[0]}, y = 0. The modules (group) are chained "
-            "around the forearm; each has its own copy of this frame."})
+            "around the forearm; each has its own copy of this frame.",
+        },
+    )
 
     # sidecar
-    rld = (f"Driven right-leg electrode M{cfg.rld_module}E{cfg.rld_input} (module "
-           f"{cfg.rld_module}, input IN{cfg.rld_input})") if cfg.rld_module is not None else None
-    bandwidth = ({"LowPassFilter": {"CutOffHz": 420, "Description": "ADS1293 sinc decimation "
-                                    "filters (R1=4, R2=4, R3=6 at 200 kHz)"}}
-                 if (cfg.R1[0], cfg.R2, cfg.R3[0], cfg.clock_hz, cfg.high_freq[0]) == (4, 4, 6, 4e6, True)
-                 else {"Description": f"ADS1293 sinc decimation filters, R1={cfg.R1}, R2={cfg.R2}, "
-                                      f"R3={cfg.R3} (see the ADS1293 datasheet for the bandwidth)"})
+    rld = (
+        (
+            f"Driven right-leg electrode M{cfg.rld_module}E{cfg.rld_input} (module "
+            f"{cfg.rld_module}, input IN{cfg.rld_input})"
+        )
+        if cfg.rld_module is not None
+        else None
+    )
+    bandwidth = (
+        {
+            "LowPassFilter": {
+                "CutOffHz": 420,
+                "Description": "ADS1293 sinc decimation filters (R1=4, R2=4, R3=6 at 200 kHz)",
+            }
+        }
+        if (cfg.R1[0], cfg.R2, cfg.R3[0], cfg.clock_hz, cfg.high_freq[0]) == (4, 4, 6, 4e6, True)
+        else {
+            "Description": f"ADS1293 sinc decimation filters, R1={cfg.R1}, R2={cfg.R2}, "
+            f"R3={cfg.R3} (see the ADS1293 datasheet for the bandwidth)"
+        }
+    )
     emg_json = {
         "TaskName": ent.task,
         "EMGReference": "Bipolar: each channel between two neighbouring electrodes of its module "
-                        "(see reference in _channels.tsv)",
+        "(see reference in _channels.tsv)",
         "SamplingFrequency": fs,
-        "PowerLineFrequency": powerline_freq if powerline_freq else "n/a",
+        "PowerLineFrequency": powerline_freq or "n/a",
         "RecordingType": "continuous",
         "EMGPlacementScheme": "Other",
-        "EMGPlacementSchemeDescription": placement_description or
-            f"Wristband of {nb_modules} modules chained around the forearm, each a {BOARD} board of "
-            "six dry electrodes in a row across the band.",
+        "EMGPlacementSchemeDescription": placement_description
+        or f"Wristband of {nb_modules} modules chained around the forearm, each a {BOARD} board of "
+        "six dry electrodes in a row across the band.",
         "HardwareFilters": {"DC-coupled": True, **bandwidth},
-        "SoftwareFilters": {"MissingSampleInterpolation": {
-            "Description": "Samples missing from the stream filled by linear interpolation "
-                           "(n_interpolated in _channels.tsv)", "Samples": int(n_missing.sum())}},
+        "SoftwareFilters": {
+            "MissingSampleInterpolation": {
+                "Description": "Samples missing from the stream filled by linear interpolation "
+                "(n_interpolated in _channels.tsv)",
+                "Samples": int(n_missing.sum()),
+            }
+        },
         "Manufacturer": "CleverHand",
         "ManufacturersModelName": f"{nb_modules}-module EMG wristband (COM_MOD + EMG_DAQ_ADS1293 + "
-                                  f"{BOARD}), Teensy 4.0 controller",
+        f"{BOARD}), Teensy 4.0 controller",
         "SoftwareVersions": f"clvhd {__version__}" + (f", firmware {firmware}" if firmware else ""),
-        "ElectrodeType": "dry", "ElectrodeMaterial": "gold-plated",
+        "ElectrodeType": "dry",
+        "ElectrodeMaterial": "gold-plated",
         "InterelectrodeDistance": ELECTRODE_PITCH_MM,
         "EMGChannelCount": len(labels),
         "RecordingDuration": n / fs,
@@ -418,34 +583,86 @@ def write_emg(root, ent, t_host, data, cfg, labels, *, start=None, powerline_fre
         emg_json["StreamStatistics"] = stats
     sidecar = emg_dir / f"{label}_emg.json"
     write_json(sidecar, emg_json)
-    coarse = {labels[c]: float(step[c]) for c in range(len(labels))
-              if good[c] and step[c] > COARSE_STEP_UV}
-    return {"emg": signal, "emg_json": sidecar, "channels": channels, "electrodes": electrodes,
-            "coordsystem": coordsys, "coarse": coarse}
+    coarse = {
+        labels[c]: float(step[c])
+        for c in range(len(labels))
+        if good[c] and step[c] > COARSE_STEP_UV
+    }
+    return {
+        "emg": signal,
+        "emg_json": sidecar,
+        "channels": channels,
+        "electrodes": electrodes,
+        "coordsystem": coordsys,
+        "coarse": coarse,
+    }
 
 
 def _motion_channels():
     """(name, component, type, tracked_point, units, reference_frame, description) of each column."""
-    rows = [("latency", "n/a", "LATENCY", "n/a", "s", "n/a",
-             "Time of the camera frame from the first EMG sample")]
-    for frame, units, desc in (("world", "m", "MediaPipe hand world landmarks (origin at the hand's "
-                                "centre)"), ("image", "n/a", "MediaPipe hand image landmarks (x, y "
-                                "fractions of the mirrored image; z depth relative to the wrist)")):
+    rows = [
+        (
+            "latency",
+            "n/a",
+            "LATENCY",
+            "n/a",
+            "s",
+            "n/a",
+            "Time of the camera frame from the first EMG sample",
+        )
+    ]
+    for frame, units, desc in (
+        ("world", "m", "MediaPipe hand world landmarks (origin at the hand's centre)"),
+        (
+            "image",
+            "n/a",
+            "MediaPipe hand image landmarks (x, y "
+            "fractions of the mirrored image; z depth relative to the wrist)",
+        ),
+    ):
         for point in HAND_LANDMARKS:
-            rows.extend((f"hand_{point}_{comp}_{frame}", comp, "POS", point, units,
-                         f"hand_{frame}", desc) for comp in "xyz")
-    rows += [*[(f"{finger}_flexion", "n/a", "JNTANG", finger, "deg", "n/a",
-                f"Bend of the {finger}: the sum of its joint angles (0 straight; "
-                "clvhd.hand.finger_flexion)") for finger in FINGERS],
-             ("pinch_aperture", "n/a", "MISC", "thumb_tip", "cm", "n/a",
-              "Distance between the thumb and index tips"),
-             ("hand_score", "n/a", "MISC", "n/a", "n/a", "n/a", "Handedness score of the "
-              "detected hand (0-1); n/a when no hand was detected"),
-             ("hand_right", "n/a", "MISC", "n/a", "n/a", "n/a", "1: right hand, 0: left hand")]
+            rows.extend(
+                (f"hand_{point}_{comp}_{frame}", comp, "POS", point, units, f"hand_{frame}", desc)
+                for comp in "xyz"
+            )
+    rows += [
+        (
+            f"{finger}_flexion",
+            "n/a",
+            "JNTANG",
+            finger,
+            "deg",
+            "n/a",
+            f"Bend of the {finger}: the sum of its joint angles (0 straight; "
+            "clvhd.hand.finger_flexion)",
+        )
+        for finger in FINGERS
+    ]
+    rows += [
+        (
+            "pinch_aperture",
+            "n/a",
+            "MISC",
+            "thumb_tip",
+            "cm",
+            "n/a",
+            "Distance between the thumb and index tips",
+        ),
+        (
+            "hand_score",
+            "n/a",
+            "MISC",
+            "n/a",
+            "n/a",
+            "n/a",
+            "Handedness score of the detected hand (0-1); n/a when no hand was detected",
+        ),
+        ("hand_right", "n/a", "MISC", "n/a", "n/a", "n/a", "1: right hand, 0: left hand"),
+    ]
     return rows
 
 
-def write_motion(root, ent, hand, t0, nominal_fps, task_description=None):
+def write_motion(root, ent, hand, t0, camera_fps, task_description=None):
     """Write the hand frames (``clvhd.hand.FRAME_DTYPE`` records, e.g. ``clvhd.hand.stack``
     output or a ``RawRecording``'s) of one recording as BIDS motion, block by block.
 
@@ -459,17 +676,20 @@ def write_motion(root, ent, hand, t0, nominal_fps, task_description=None):
     n, first, latest = 0, None, None
     with motion.open("w", encoding="utf-8") as f:
         for a in range(0, len(hand), 5000):
-            sub = hand[a:a + 5000]
+            sub = hand[a : a + 5000]
             sub = sub[sub["t"] >= t0]
             if not len(sub):
                 continue
             k = len(sub)
             table = np.column_stack(
                 [sub["t"] - t0]
-                + [sub[key].reshape(k, -1).astype(np.float64)
-                   for key in ("hand_world", "hand_image")]
+                + [
+                    sub[key].reshape(k, -1).astype(np.float64)
+                    for key in ("hand_world", "hand_image")
+                ]
                 + [finger_flexion(sub["hand_world"]), pinch_aperture(sub["hand_world"])[:, None]]
-                + [sub["score"].astype(np.float64), sub["right"].astype(np.float64)])
+                + [sub["score"].astype(np.float64), sub["right"].astype(np.float64)]
+            )
             assert table.shape[1] == len(channels)
             for row in table.tolist():
                 f.write("\t".join([f"{row[0]:.6f}"] + [_cell(v) for v in row[1:]]) + "\n")
@@ -477,39 +697,68 @@ def write_motion(root, ent, hand, t0, nominal_fps, task_description=None):
             latest = table[-1, 0]
             n += k
     channels_tsv = motion_dir / f"{label}_channels.tsv"
-    write_tsv(channels_tsv, ["name", "component", "type", "tracked_point", "units",
-                              "reference_frame", "description", "status"],
-               [[*row, "good"] for row in channels])
-    write_json(channels_tsv.with_suffix(".json"), {"reference_frame": {
-        "Description": "Frame of the position channels; x right, y down, z away from the camera.",
-        "Levels": {
-            "hand_world": {"Description": "MediaPipe hand world frame, origin at the hand's centre",
-                           "SpatialAxes": "RDB", "RotationRule": "right-hand",
-                           "RotationOrder": "n/a"},
-            "hand_image": {"Description": "Mirrored camera image: x, y fractions of its width "
-                                          "and height from the top left; z depth from the wrist"}}}})
+    write_tsv(
+        channels_tsv,
+        [
+            "name",
+            "component",
+            "type",
+            "tracked_point",
+            "units",
+            "reference_frame",
+            "description",
+            "status",
+        ],
+        [[*row, "good"] for row in channels],
+    )
+    write_json(
+        channels_tsv.with_suffix(".json"),
+        {
+            "reference_frame": {
+                "Description": "Frame of the position channels; x right, y down, z away from the camera.",
+                "Levels": {
+                    "hand_world": {
+                        "Description": "MediaPipe hand world frame, origin at the hand's centre",
+                        "SpatialAxes": "RDB",
+                        "RotationRule": "right-hand",
+                        "RotationOrder": "n/a",
+                    },
+                    "hand_image": {
+                        "Description": "Mirrored camera image: x, y fractions of its width "
+                        "and height from the top left; z depth from the wrist"
+                    },
+                },
+            }
+        },
+    )
     span = (latest - first) if n > 1 and first is not None and latest is not None else 0.0
     counts: dict[str, int] = {}
     for row in channels:
         counts[row[2]] = counts.get(row[2], 0) + 1
     sidecar = motion_dir / f"{label}_motion.json"
-    write_json(sidecar, {
-        "TaskName": ent.task,
-        "SamplingFrequency": float(nominal_fps),
-        "SamplingFrequencyEffective": (n - 1) / span if span > 0 else "n/a",
-        "TrackingSystemName": "MediaPipe from a single RGB camera",
-        "ManufacturersModelName": "MediaPipe hand landmarker",
-        "SoftwareVersions": f"clvhd {__version__}",
-        "RecordingDuration": float(span),
-        "MotionChannelCount": len(channels),
-        "POSChannelCount": counts["POS"], "JNTANGChannelCount": counts["JNTANG"],
-        "LATENCYChannelCount": counts["LATENCY"], "MiscChannelCount": counts["MISC"],
-        "TrackedPointsCount": len(HAND_LANDMARKS),
-        "MissingValues": "n/a",
-        **({"TaskDescription": task_description} if task_description else {}),
-        "SubjectArtefactDescription": "Frames are irregular (frames skipped while the models "
-                                      "run): use the latency channel. Times are when the frame "
-                                      "reached the host, about one frame period after exposure."})
+    write_json(
+        sidecar,
+        {
+            "TaskName": ent.task,
+            "SamplingFrequency": float(camera_fps),
+            "SamplingFrequencyEffective": (n - 1) / span if span > 0 else "n/a",
+            "TrackingSystemName": "MediaPipe from a single RGB camera",
+            "ManufacturersModelName": "MediaPipe hand landmarker",
+            "SoftwareVersions": f"clvhd {__version__}",
+            "RecordingDuration": float(span),
+            "MotionChannelCount": len(channels),
+            "POSChannelCount": counts["POS"],
+            "JNTANGChannelCount": counts["JNTANG"],
+            "LATENCYChannelCount": counts["LATENCY"],
+            "MiscChannelCount": counts["MISC"],
+            "TrackedPointsCount": len(HAND_LANDMARKS),
+            "MissingValues": "n/a",
+            **({"TaskDescription": task_description} if task_description else {}),
+            "SubjectArtefactDescription": "Frames are irregular (frames skipped while the models "
+            "run): use the latency channel. Times are when the frame "
+            "reached the host, about one frame period after exposure.",
+        },
+    )
     return {"motion": motion, "motion_json": sidecar, "channels": channels_tsv, "frames": n}
 
 
@@ -533,10 +782,17 @@ def write_beh(root, ent, columns, table, **sidecar):
     units or None)}, ``table`` its rows; ``sidecar``: more of the .json. Returns the .tsv path."""
     path = ent.folder(root) / "beh" / f"{ent.label()}_beh.tsv"
     write_tsv(path, list(columns), table)
-    write_json(path.with_suffix(".json"), {
-        "TaskName": ent.task,
-        **{k: {"Description": d, **({"Units": u} if u else {})} for k, (d, u) in columns.items()},
-        **sidecar})
+    write_json(
+        path.with_suffix(".json"),
+        {
+            "TaskName": ent.task,
+            **{
+                k: {"Description": d, **({"Units": u} if u else {})}
+                for k, (d, u) in columns.items()
+            },
+            **sidecar,
+        },
+    )
     return path
 
 
@@ -544,9 +800,15 @@ def write_derivative_description(root, pipeline, generated_by, ignore=("*.npz",)
     """``derivatives/<pipeline>/``'s ``dataset_description.json`` and ``.bidsignore`` (of the
     files ``ignore``); returns that folder."""
     folder = Path(root) / "derivatives" / pipeline
-    write_json(folder / "dataset_description.json", {
-        "Name": pipeline, "BIDSVersion": BIDS_VERSION, "DatasetType": "derivative",
-        "GeneratedBy": [{"Name": generated_by, "Version": __version__, "CodeURL": CODE_URL}]})
+    write_json(
+        folder / "dataset_description.json",
+        {
+            "Name": pipeline,
+            "BIDSVersion": BIDS_VERSION,
+            "DatasetType": "derivative",
+            "GeneratedBy": [{"Name": generated_by, "Version": __version__, "CodeURL": CODE_URL}],
+        },
+    )
     (folder / ".bidsignore").write_text("".join(f"{g}\n" for g in ignore))
     return folder
 
@@ -557,10 +819,12 @@ def next_run(root, ent):
     ent = dataclasses.replace(ent, run=None)
     prefix = f"{ent.label()}_run-"
     used = set()
-    for folder, pattern in ((ent.folder(root) / "emg", f"{prefix}*_emg.*"),
-                            (ent.folder(Path(root) / "sourcedata"), f"{prefix}*_clvhd.json")):
+    for folder, pattern in (
+        (ent.folder(root) / "emg", f"{prefix}*_emg.*"),
+        (ent.folder(Path(root) / "sourcedata"), f"{prefix}*_clvhd.json"),
+    ):
         for p in folder.glob(pattern):
-            run = p.name[len(prefix):].split("_")[0]
+            run = p.name[len(prefix) :].split("_")[0]
             if run.isdigit():
                 used.add(int(run))
     return f"{max(used, default=0) + 1:02d}"
@@ -581,8 +845,19 @@ class RawRecording:
     as numpy record arrays (whole records only).
     """
 
-    def __init__(self, root, ent, cfg, labels, *, hand=False, camera_fps=None, firmware=None,
-                 export=None, events=None):
+    def __init__(
+        self,
+        root,
+        ent,
+        cfg,
+        labels,
+        *,
+        hand=False,
+        camera_fps=None,
+        firmware=None,
+        export=None,
+        events=None,
+    ):
         folder = ent.folder(Path(root) / "sourcedata")
         folder.mkdir(parents=True, exist_ok=True)
         stem = f"{ent.label()}_clvhd"
@@ -590,12 +865,21 @@ class RawRecording:
         self.emg_dtype = emg_dtype(len(labels))
         self.header = {
             "format": "clvhd raw recording 1",
-            "entities": dataclasses.asdict(ent), "fs": cfg.odr(), "labels": list(labels),
-            "config": dataclasses.asdict(cfg), "firmware": firmware, "camera_fps": camera_fps,
-            "emg_file": f"{stem}-emg.dat", "hand_file": f"{stem}-hand.dat" if hand else None,
+            "entities": dataclasses.asdict(ent),
+            "fs": cfg.odr(),
+            "labels": list(labels),
+            "config": dataclasses.asdict(cfg),
+            "firmware": firmware,
+            "camera_fps": camera_fps,
+            "emg_file": f"{stem}-emg.dat",
+            "hand_file": f"{stem}-hand.dat" if hand else None,
             "events_file": f"{stem}-events.tsv" if events is not None else None,
             "events_columns": list(events or []),
-            "export": export or {}, "acq_time": None, "complete": False, "stats": None}
+            "export": export or {},
+            "acq_time": None,
+            "complete": False,
+            "stats": None,
+        }
         self._write_header()
         self._emg = self._hand = self._events = None
         try:
@@ -644,8 +928,13 @@ class RawRecording:
         if unknown:
             raise ValueError(f"no event columns {sorted(unknown)}: {cols}")
         assert self._events is not None  # opened in __init__ when events is given
-        self._events.write("\t".join([f"{t_host:.6f}", _cell(duration), trial_type]
-                                     + [_cell(values.get(c)) for c in cols]) + "\n")
+        self._events.write(
+            "\t".join(
+                [f"{t_host:.6f}", _cell(duration), trial_type]
+                + [_cell(values.get(c)) for c in cols]
+            )
+            + "\n"
+        )
 
     def flush(self):
         """Push what was appended to the disk."""
@@ -666,11 +955,15 @@ class RawRecording:
     def open(header_path):
         """(header, entities, EMG records, hand records or None) of a streamed recording."""
         from .hand import FRAME_DTYPE
+
         header_path = Path(header_path)
         header = json.loads(header_path.read_text())
         emg = _records(header_path.with_name(header["emg_file"]), emg_dtype(len(header["labels"])))
-        hand = (_records(header_path.with_name(header["hand_file"]), FRAME_DTYPE)
-                if header["hand_file"] else None)
+        hand = (
+            _records(header_path.with_name(header["hand_file"]), FRAME_DTYPE)
+            if header["hand_file"]
+            else None
+        )
         return header, Entities(**header["entities"]), emg, hand
 
 
@@ -701,39 +994,66 @@ def export_recording(source, keep_source=False, file_format=None):
     exp = header["export"]
     write_dataset(root)
     write_participant(root, ent.subject, **(exp.get("participant") or {}))
-    contact = check_contact(np.asarray(emg["data"][:int(cfg.odr())], dtype=np.float64))
+    contact = check_contact(np.asarray(emg["data"][: int(cfg.odr())], dtype=np.float64))
     # the wall-clock time of the first sample, taken while recording: time.monotonic() restarts
     # with the computer, so it cannot be converted after a reboot
     start = header.get("acq_time") or acq_time(float(emg["t_host"][0]))
     written = write_emg(
-        root, ent, emg["t_host"], emg["data"], cfg, header["labels"], start=start, contact=contact,
-        firmware=header["firmware"], stats=header["stats"],
+        root,
+        ent,
+        emg["t_host"],
+        emg["data"],
+        cfg,
+        header["labels"],
+        start=start,
+        contact=contact,
+        firmware=header["firmware"],
+        stats=header["stats"],
         powerline_freq=exp.get("powerline_freq"),
         muscles={int(m): name for m, name in (exp.get("muscles") or {}).items()},
         placement_description=exp.get("placement_description"),
         task_description=exp.get("task_description"),
-        file_format=file_format or exp.get("file_format", "edf"))
+        file_format=file_format or exp.get("file_format", "edf"),
+    )
     files = [written["emg"]]
     t0 = float(emg["t_host"][0])
     n_frames = None
     if hand is not None:
-        motion = write_motion(root, ent, hand, t0, header["camera_fps"],
-                              task_description=exp.get("task_description"))
+        motion = write_motion(
+            root, ent, hand, t0, header["camera_fps"], task_description=exp.get("task_description")
+        )
         written["motion"] = motion["motion"]
         files.append(motion["motion"])
         n_frames = motion["frames"]
-    if header.get("events_file") and path.with_name(header["events_file"]).exists():
+    if header["events_file"] and path.with_name(header["events_file"]).exists():
         rows = read_tsv(path.with_name(header["events_file"]))
         cols = header["events_columns"]
         fs = cfg.odr()
-        events = [event_row(float(r["t_host"]), t0, fs, duration=r["duration"],
-                            trial_type=r["trial_type"], **{c: r[c] for c in cols}) for r in rows]
+        events = [
+            event_row(
+                float(r["t_host"]),
+                t0,
+                fs,
+                duration=r["duration"],
+                trial_type=r["trial_type"],
+                **{c: r[c] for c in cols},
+            )
+            for r in rows
+        ]
         written["events"] = write_events(
-            written["emg"].with_name(f"{ent.label()}_events.tsv"), events,
+            written["emg"].with_name(f"{ent.label()}_events.tsv"),
+            events,
             ["onset", "duration", "sample", "trial_type", *cols],
-            {"onset": {"Description": "Time from the first EMG sample of the file.", "Units": "s"},
-             "duration": {"Units": "s"}, "sample": {"Description": "EMG sample at the onset (zero-based)."},
-             **(exp.get("event_descriptions") or {})})
+            {
+                "onset": {
+                    "Description": "Time from the first EMG sample of the file.",
+                    "Units": "s",
+                },
+                "duration": {"Units": "s"},
+                "sample": {"Description": "EMG sample at the onset (zero-based)."},
+                **(exp.get("event_descriptions") or {}),
+            },
+        )
     write_scans(root, ent, files, start)
     written.update(sourcedata=path, contact=contact, duration=len(emg) / cfg.odr(), acq_time=start)
     if not keep_source:
@@ -748,13 +1068,16 @@ def _check_export(written, n_samples, labels, n_frames):
     """Raise unless the EMG file opens with every channel and sample, and the motion file has
     every frame."""
     import pyedflib
+
     with pyedflib.EdfReader(str(written["emg"])) as r:
         if r.getSignalLabels() != list(labels) or min(r.getNSamples()) < n_samples:
             raise OSError(f"{written['emg'].name} does not read back complete: sourcedata kept")
     if n_frames is not None:
         with written["motion"].open(encoding="utf-8") as f:
             if sum(1 for _ in f) != n_frames:
-                raise OSError(f"{written['motion'].name} does not read back complete: sourcedata kept")
+                raise OSError(
+                    f"{written['motion'].name} does not read back complete: sourcedata kept"
+                )
 
 
 def _delete_source(path, header, root):
@@ -772,12 +1095,15 @@ def _delete_source(path, header, root):
 def main():
     """``clvhd-export``: write recordings streamed to sourcedata/ (e.g. cut short by a crash) to BIDS."""
     import argparse
-    p = argparse.ArgumentParser(description=(main.__doc__ or "").split(": ", 1)[1])
+
+    p = argparse.ArgumentParser(description=(main.__doc__ or "").splitlines()[0])
     p.add_argument("headers", nargs="+", type=Path, help="<label>_clvhd.json files in sourcedata/")
     p.add_argument("--keep", action="store_true", help="keep them in sourcedata/ once exported")
     p.add_argument("--format", choices=sorted(FORMATS), help="over the one chosen when recording")
     args = p.parse_args()
     for path in args.headers:
         out = export_recording(path, keep_source=args.keep, file_format=args.format)
-        print(f"{path.name}: {out['duration']:.1f} s -> {out['emg']}"
-              + (f" and {out['motion'].name}" if "motion" in out else ""))
+        print(
+            f"{path.name}: {out['duration']:.1f} s -> {out['emg']}"
+            + (f" and {out['motion'].name}" if "motion" in out else "")
+        )

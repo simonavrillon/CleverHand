@@ -21,7 +21,7 @@ def test_blocks_filter_as_one_starting_at_the_first_complete_sample():
     x[1000:1020, 2] = np.nan  # a gap: filtered as the last value
     whole_k, whole = CausalFilter(emg_band(FS))(x)
     f = CausalFilter(emg_band(FS))
-    parts = [f(x[a:a + 128]) for a in range(0, len(x), 128)]
+    parts = [f(x[a : a + 128]) for a in range(0, len(x), 128)]
     assert whole_k == parts[0][0] == 5 and all(k == 0 for k, _ in parts[1:])
     assert np.allclose(np.vstack([y for _, y in parts]), whole)
     assert np.isfinite(whole).all()
@@ -36,6 +36,13 @@ def test_nothing_until_a_complete_sample():
 
 def test_notches_the_mains_and_its_harmonics():
     t = np.arange(int(4 * FS)) / FS
-    _, y = CausalFilter(emg_band(FS, powerline=50))(np.column_stack(
-        [np.sin(2 * np.pi * 50 * t), np.sin(2 * np.pi * 150 * t), np.sin(2 * np.pi * 100 * t + 1)]))
-    assert np.abs(y[-int(FS):]).max(axis=0).max() < 0.05  # after the notches settle
+    _, y = CausalFilter(emg_band(FS, powerline=50))(
+        np.column_stack(
+            [
+                np.sin(2 * np.pi * 50 * t),
+                np.sin(2 * np.pi * 150 * t),
+                np.sin(2 * np.pi * 100 * t + 1),
+            ]
+        )
+    )
+    assert np.abs(y[-int(FS) :]).max(axis=0).max() < 0.05  # after the notches settle

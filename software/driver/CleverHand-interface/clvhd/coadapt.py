@@ -1,44 +1,10 @@
 """Co-adaptive myoelectric cursor control, after Madduri et al., Nat. Mach. Intell. 8, 372 (2026).
 
-The pieces of their experiment, without the display (``examples/04_cursor_coadapt.py``):
-
-- ``Envelope``: EMG linear envelope at the 60 Hz display rate (their dissertation, ch. 3:
-  band-pass, rectification, 40 Hz low-pass, moving average down to 60 Hz; a wider band
-  than theirs, ``BAND``).
-- ``Trajectory``: the pseudo-random sum-of-sines target, with the 5 s speed ramp.
-- ``optimal_decoder`` / ``smoothbatch``: the decoder update every 20 s,
-  D* = argmin ||D x - (tau - y)/H||^2 + lambda ||D||^2 on the last 20 s, then
-  D = alpha D- + (1 - alpha) D* (SmoothBatch, Orsborn et al. 2012).
-- ``conditions`` / ``session_plan``: the learning rates (fixed, slow, fast) at the low penalty,
-  each once in each of two blocks of shuffled trials.
-- ``window_metrics``: what each 20 s window shows: tracking error, effort, and how the
-  decoder's EMG part differs from the calibration's (gain, direction).
-
-Not in the paper:
-
-- The decoder is the calibration's (``clvhd.decoder.WienerFilter``, x its features: log
-  envelopes, z-scored, over 100 ms, and a constant), and every trial starts from its fit
-  instead of the paper's random D1 / D2, which hardly moved the cursor for the first 20 s
-  while the participant, seeing nothing, contracted harder than they would later.
-- The intended velocity is (tau - y)/H, the error closed in ``HORIZON_S``, not in one frame
-  (the paper's dt): a 2 cm error asks for 4 cm/s instead of 120 cm/s. With the paper's
-  label, lambda alone brought the fits back to cursor speeds, so it decided whether a good
-  decoder shrank to nothing or blew up (replaying recorded EMG: 6 to 160 cm/s within a
-  minute, whatever the input's scale). With H, the fits ask for the speeds the task needs,
-  and refine the decoder rather than rescale it: on in-control EMG, D* runs at 3-4 cm/s,
-  the target's speed.
-- The constant term (the velocity added whatever the EMG) stays the calibration's: only the
-  EMG weights are refitted. Refitted, it learnt the last 20 s's mean error and applied it
-  for the next 20 s, when that error was gone: the cursor drifted, the error flipped, and
-  so did the constant (recorded, slow / low: up to the target's own speed by 140 s).
-- A fixed-decoder condition (alpha = 1: D* is fitted and logged, never used), the control
-  that separates the decoder's adaptation from the participant's practice; and every trial
-  ends with ``PROBE_S`` s on the calibration's decoder, unannounced: the participant still
-  in control then means the decoder learnt them, out of control means they learnt it.
-- lambda is relative, like the calibration's ridge: times the mean feature energy of the
-  20 s. Low (1, about what the calibration's cross-validation
-  picks) and high (10) keep the paper's tenfold contrast, and its sense: a higher penalty
-  gives a smaller decoder, so more effort for the same speed.
+The pieces of their experiment, without the display (``examples/04_cursor_coadapt.py``): the
+EMG ``Envelope`` at the 60 Hz display rate, the pseudo-random sum-of-sines ``Trajectory``, the
+20 s decoder update (``optimal_decoder`` / ``smoothbatch``), the conditions (``conditions`` /
+``session_plan``) and the per-window metrics (``window_metrics``). How this deviates from the
+paper: docs/experiments.md.
 
 Units: positions in cm on the screen, velocities in cm/s, envelopes in mV.
 """
@@ -58,7 +24,8 @@ STUCK_S = 3.33  # cursor held at the screen edge this long: reset to the centre
 FIELD_CM = (22.7, 15.8)
 # SmoothBatch alpha: weight of the previous decoder (fixed: never updated, the control)
 LEARNING_RATES = {"fixed": 1.0, "slow": 0.75, "fast": 0.25}
-PENALTIES = {"low": 1.0, "high": 10.0}  # lambda_D, times the mean feature energy (the paper: 1e2, 1e3)
+# lambda_D, times the mean feature energy (the paper: 1e2, 1e3)
+PENALTIES = {"low": 1.0, "high": 10.0}
 PENALTY = "low"  # the sessions'
 HORIZON_S = 0.5  # the intended velocity closes the cursor's error in this time
 PROBE_S = 20.0  # each trial's last seconds, on the calibration's decoder
@@ -68,9 +35,11 @@ FREQS_Y = (0.15, 0.35)
 
 
 def conditions():
-    """The decoder conditions, every learning rate at ``PENALTY``: dicts of rate, alpha, penalty, lam."""
-    return [{"rate": r, "alpha": alpha, "penalty": PENALTY, "lam": PENALTIES[PENALTY]}
-            for r, alpha in LEARNING_RATES.items()]
+    """The decoder conditions, every learning rate at ``PENALTY``: dicts of learning_rate, alpha, penalty, lambda."""
+    return [
+        {"learning_rate": r, "alpha": alpha, "penalty": PENALTY, "lambda": PENALTIES[PENALTY]}
+        for r, alpha in LEARNING_RATES.items()
+    ]
 
 
 def session_plan(rng, blocks=2):
@@ -115,7 +84,7 @@ class Trajectory:
         out = []
         for freqs, phases in zip((FREQS_X, FREQS_Y), self.phases, strict=True):
             f = np.asarray(freqs)
-            out.append((np.sin(2 * np.pi * f * s + phases) / f ** 2).sum(axis=1))
+            out.append((np.sin(2 * np.pi * f * s + phases) / f**2).sum(axis=1))
         return np.column_stack(out)
 
     def position(self, t):
@@ -145,8 +114,9 @@ def optimal_decoder(X, V, lam, constant):
     """
     Xe = X[:-1]
     G = Xe @ Xe.T
-    W = np.linalg.solve(G + lam * np.trace(G) / len(G) * np.eye(len(G)),
-                        Xe @ (V - np.asarray(constant)[:, None]).T).T
+    W = np.linalg.solve(
+        G + lam * np.trace(G) / len(G) * np.eye(len(G)), Xe @ (V - np.asarray(constant)[:, None]).T
+    ).T
     return np.column_stack([W, constant])
 
 
@@ -163,11 +133,14 @@ def window_metrics(tau, y, effort, X, D, D0):
     P, P0 = X[:, :-1] @ D[:, :-1].T, X[:, :-1] @ D0[:, :-1].T
     s0 = np.linalg.norm(P0, axis=1).mean()
     ok = [a for a in range(2) if P[:, a].std() > 0 and P0[:, a].std() > 0]
-    return {"error": float(np.linalg.norm(np.asarray(tau) - np.asarray(y), axis=1).mean()),
-            "effort": float(np.mean(effort)),
-            "gain": float(np.linalg.norm(P, axis=1).mean() / s0) if s0 > 0 else np.nan,
-            "direction": float(np.mean([np.corrcoef(P[:, a], P0[:, a])[0, 1] for a in ok]))
-            if ok else np.nan}
+    return {
+        "error": float(np.linalg.norm(np.asarray(tau) - np.asarray(y), axis=1).mean()),
+        "effort": float(np.mean(effort)),
+        "gain": float(np.linalg.norm(P, axis=1).mean() / s0) if s0 > 0 else np.nan,
+        "direction": float(np.mean([np.corrcoef(P[:, a], P0[:, a])[0, 1] for a in ok]))
+        if ok
+        else np.nan,
+    }
 
 
 class Envelope:
@@ -183,6 +156,7 @@ class Envelope:
 
     def __init__(self, fs, n_channels, powerline=50.0, band=BAND):
         from scipy.signal import butter
+
         self.band = CausalFilter(emg_band(fs, band, powerline))
         self.smooth = butter(4, 40, btype="low", fs=fs, output="sos")
         self.zi_smooth = np.zeros((self.smooth.shape[0], 2, n_channels))
@@ -193,6 +167,7 @@ class Envelope:
     def add(self, data):
         """Filter new samples (``data`` in V, NaN where missing) and add their envelope."""
         from scipy.signal import sosfilt
+
         _, y = self.band(data * 1e3)  # mV
         if len(y) == 0:
             return

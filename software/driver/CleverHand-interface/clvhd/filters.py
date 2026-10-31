@@ -12,7 +12,7 @@ BAND = (20, 450)  # Hz
 
 
 def fill_gaps(last, data):
-    """`data` with each missing sample replaced by its channel's previous value (`last`: the row before)."""
+    """``data`` with each missing sample replaced by its channel's previous value (``last``: the row before)."""
     rows = np.vstack([last, data])
     idx = np.maximum.accumulate(np.where(np.isnan(rows), 0, np.arange(len(rows))[:, None]), axis=0)
     return rows[idx, np.arange(rows.shape[1])][1:]
@@ -22,9 +22,12 @@ def emg_band(fs, band=BAND, powerline=50.0):
     """Second-order sections: 4th-order low-pass at ``band[1]``, notches at ``powerline`` and its
     harmonics below it (none when 0), 4th-order high-pass at ``band[0]``."""
     from scipy.signal import butter, iirnotch, tf2sos
+
     stages = [butter(4, band[1], btype="low", fs=fs, output="sos")]
     if powerline:
-        stages += [tf2sos(*iirnotch(f, 30, fs=fs)) for f in np.arange(powerline, band[1], powerline)]
+        stages += [
+            tf2sos(*iirnotch(f, 30, fs=fs)) for f in np.arange(powerline, band[1], powerline)
+        ]
     stages.append(butter(4, band[0], btype="high", fs=fs, output="sos"))
     return np.concatenate(stages)
 
@@ -40,6 +43,7 @@ class CausalFilter:
         """``(k, y)``: ``y`` the filtered ``x[k:]`` (N, channels), ``k`` the first complete sample
         of the first call (later calls: 0; ``len(x)`` while none has arrived)."""
         from scipy.signal import sosfilt, sosfilt_zi
+
         k = 0
         if len(x) == 0:
             return 0, x

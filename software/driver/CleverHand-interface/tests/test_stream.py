@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 import clvhd
-from clvhd.stream import SETTLE_SAMPLES, LinearClock, _Module
+from clvhd.stream import SETTLE_SAMPLES, LinearClock, ModuleAligner
 
 
 def record(port, seconds):
@@ -18,12 +18,12 @@ def record(port, seconds):
             chunks = []
             t_end = time.monotonic() + seconds
             while time.monotonic() < t_end:
-                _, t, data = s.read(0.02)
-                chunks.append((t, data))
+                _, t_device, data = s.read(0.02)
+                chunks.append((t_device, data))
             stats, crc = s.stats(), s.crc_errors
-    t = np.concatenate([c[0] for c in chunks])
+    t_device = np.concatenate([c[0] for c in chunks])
     data = np.concatenate([c[1] for c in chunks])
-    return t, data, stats, crc
+    return t_device, data, stats, crc
 
 
 class TestLinearClock:
@@ -32,7 +32,7 @@ class TestLinearClock:
         x = np.arange(100000)
         y = 1234.5 + 468.75 * x + np.random.default_rng(1).uniform(0, 100, len(x))
         for i in range(0, len(x), 40):
-            clock.update(x[i:i + 40], y[i:i + 40])
+            clock.update(x[i : i + 40], y[i : i + 40])
         assert abs(clock.slope() - 468.75) < 1e-3
         assert abs(clock.inverse(clock.predict(5000.25)) - 5000.25) < 1e-6
 
@@ -41,19 +41,19 @@ class TestModule:
     def test_settling_samples_are_dropped(self):
         # the first samples after START_CONV swing from -550 mV while the filters settle
         T = 1e6 / (200000 / 96)
-        mod = _Module(T, 1 - 1 / (20 * 2083), 4000)
+        mod = ModuleAligner(T, 1 - 1 / (20 * 2083), 4000)
         n = 400
         ts = (1e6 + np.arange(n) * T).astype(np.uint32)
         v = np.zeros((n, 3))
         v[:SETTLE_SAMPLES] = -0.55
         for i in range(0, n, 5):  # batches shorter than the settling
-            mod.add(ts[i:i + 5], v[i:i + 5])
+            mod.add(ts[i : i + 5], v[i : i + 5])
         assert mod.samples == n - SETTLE_SAMPLES and mod.dropped == 0
         assert np.all(mod.v == 0)
 
     def test_indexing_tolerates_poll_jitter(self):
         # the Teensy stamps a sample when it polls it: up to a whole poll round
-        # (~350 us at 4 MHz, a whole poll round) after the sample, against a 469 us period
+        # (~350 us at 4 MHz) after the sample, against a 469 us period
         # Drops and duplicates (80 us late) are injected, some among the first frames.
         T = 1e6 / (204800 / 96)
         for seed in range(5):
@@ -67,23 +67,24 @@ class TestModule:
             t = np.sort(np.concatenate([t[~drop], t[dup] + 80]))
             ts = (t.astype(np.int64) & 0xFFFFFFFF).astype(np.uint32)
             v = np.zeros((len(t), 3))
-            mod = _Module(T, 1 - 1 / (20 * 2133), 4000)
+            mod = ModuleAligner(T, 1 - 1 / (20 * 2133), 4000)
             mod.to_settle = 0  # count every frame
             for i in range(0, len(t), 40):
-                mod.add(ts[i:i + 40], v[i:i + 40])
+                mod.add(ts[i : i + 40], v[i : i + 40])
             assert (mod.samples, mod.dropped, mod.duplicates) == (n - drop.sum(), drop.sum(), 3)
 
 
 class TestStreamAgainstSim:
     def test_stream_is_complete_and_aligned(self, sim):
         # 5 s spans the simulated micros() wraparound
-        t, data, stats, crc = record(sim.port, 5)
+        t_device, data, stats, crc = record(sim.port, 5)
         rate = 200000 / 96
         assert crc == 0
         for st in stats:
             assert abs(st["samples"] - 5 * rate) < 0.03 * 5 * rate
             assert st["dropped"] == 0 and st["duplicates"] == 0
-        assert np.all(np.diff(t) > 0) and np.max(np.diff(t)) < 1.5 / rate  # no gap at the wrap
+        # no gap at the wrap
+        assert np.all(np.diff(t_device) > 0) and np.max(np.diff(t_device)) < 1.5 / rate
         # the fitted rates match the simulated clock offsets
         ppm = np.array(sim.ppm())
         expected = ((1 + ppm * 1e-6) / (1 + ppm[0] * 1e-6) - 1) * 1e6
@@ -92,7 +93,9 @@ class TestStreamAgainstSim:
         ok = ~np.isnan(data).any(axis=1)
         assert ok.mean() > 0.99
         ch1 = data[ok][2000:, 0::3]
-        mismatch = np.sqrt(np.mean((ch1[:, 1:] - ch1[:, [0]]) ** 2, axis=0) / np.mean(ch1[:, 0] ** 2))
+        mismatch = np.sqrt(
+            np.mean((ch1[:, 1:] - ch1[:, [0]]) ** 2, axis=0) / np.mean(ch1[:, 0] ** 2)
+        )
         assert mismatch.max() < 0.01
 
     def test_faults_are_detected(self, faulty_sim):
